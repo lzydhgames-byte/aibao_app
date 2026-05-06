@@ -1,0 +1,17 @@
+server:
+  port: 8080
+  log_dir: ./logs
+  log_level: debug
+
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+  sslmode: disable
+  # password: from env AIBAO_POSTGRES_PASSWORD
+
+redis:
+  addr: 127.0.0.1:6379
+  db: 0
+  # password: from env AIBAO_REDIS_PASSWORD

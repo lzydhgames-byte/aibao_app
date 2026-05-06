@@ -1,0 +1,22 @@
+# 配置示例 — 生产环境复制本文件后必须调整：
+#   server.log_level: info（生产关闭 debug）
+#   server.log_dir: /var/log/aibao（写入系统日志目录）
+# 敏感字段（密码等）必须通过环境变量注入，不要写入文件：
+#   AIBAO_POSTGRES_PASSWORD
+#   AIBAO_REDIS_PASSWORD
+
+server:
+  port: 8080
+  log_dir: ./logs
+  log_level: debug
+
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+  sslmode: disable
+
+redis:
+  addr: 127.0.0.1:6379
+  db: 0
