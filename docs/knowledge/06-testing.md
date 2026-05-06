@@ -8,7 +8,8 @@
 | **端到端** | 整个系统 | 分钟级 | 注册→生成故事完整流程 |
 
 **金字塔原则**：单元最多、集成适中、E2E 最少。  
-项目目标：service+pkg ≥ 70%；gateway 做契约测试；部署前跑 smoke.sh。
+项目目标：service+pkg ≥ 70%；gateway 做契约测试；部署前跑 smoke.sh。  
+**为什么金字塔形**：单元测试快、稳、便宜——多写没关系；E2E 慢、脆（依赖网络/数据库状态）——多了拖慢 CI 还经常莫名挂掉。底层多上层少能在"测得全"和"跑得快"之间取得最佳平衡。
 
 ## 6.2 TDD（测试驱动开发）
 **先写测试，再写实现**。三步循环：
@@ -17,26 +18,30 @@
 3. 🔵 **Refactor** 在测试保护下整理代码
 
 **类比**：装修前先画图纸，工人照图纸做。先随便砌墙再说"看看像不像"会重做。  
-项目体现：Plan 1 每个 Task 都明确写了 "Step N.1 写失败测试 → ..."。
+项目体现：Plan 1 每个 Task 都明确写了 "Step N.1 写失败测试 → ..."。  
+**为什么需要**：先写实现容易"边写边偏离需求"——做完发现"对了哦还要测试"，往往为了凑测试改实现。TDD 反过来：测试先定义"成功长什么样"，实现只需"让测试过"——目标永远清晰。
 
 ## 6.3 `t.TempDir()` 测试隔离
 ```go
 dir := t.TempDir()   // 临时目录，测试结束自动删
 ```
-每个测试有独立目录，互不干扰。
+每个测试有独立目录，互不干扰。  
+**为什么需要**：如果两个测试都往 `/tmp/foo` 写文件，跑顺序不同结果就不同——典型的 flaky test 来源。`t.TempDir` 给每个测试独立空间，测试间绝不污染。
 
 ## 6.4 `t.Setenv()` 环境变量隔离
 ```go
 t.Setenv("KEY", "val")   // 测试结束自动还原
 ```
 对比 `os.Setenv`：不会自动还原，测试间会污染 → flaky test。  
-用 `t.Setenv` 后该测试**禁止 `t.Parallel()`**，Go 自动检测报错。
+用 `t.Setenv` 后该测试**禁止 `t.Parallel()`**，Go 自动检测报错。  
+**为什么需要**：环境变量是进程全局的——测试 A 设了不还原，测试 B 跑时就会"莫名其妙"看见这个值。`t.Setenv` 把"测试结束还原"变成自动行为。
 
 ## 6.5 testify（assert / require）
 - `require.NoError(t, err)` —— 失败**立即停**当前测试
 - `assert.Equal(t, want, got)` —— 失败**继续跑**
 
-典型组合：err 检查用 require（继续跑无意义），字段断言用 assert（一次跑完看全部错误）。
+典型组合：err 检查用 require（继续跑无意义），字段断言用 assert（一次跑完看全部错误）。  
+**为什么分两个**：err != nil 之后 cfg 是 nil，再跑 `cfg.Server.Port` 会 panic——必须 require 立刻停。但多个字段断言可以让所有失败一起暴露，开发者一次性修——assert 适合这种。
 
 ## 6.6 表驱动测试
 把"输入→期望"做成表，循环测试：
@@ -46,14 +51,16 @@ for c, want := range cases {
     assert.Equal(t, want, New(c, "x", "y").HTTPStatus())
 }
 ```
-加新 case 只是加一行，一目了然。
+加新 case 只是加一行，一目了然。  
+**为什么需要**：测一个映射有 7 种枚举值——写 7 个测试函数太啰嗦且互相重复。表驱动一目了然看清楚"哪些情况都被覆盖了"，加新 case 只加一行。
 
 ## 6.7 build tags `//go:build integration`
 让某些 `.go` 文件**只在带特定 tag 时被编译**。
 - `go test ./...` —— 跳过集成测试
 - `go test -tags=integration ./...` —— 跑集成测试
 
-分开是因为集成测试要起 Docker 容器，慢。
+分开是因为集成测试要起 Docker 容器，慢。  
+**为什么需要**：日常开发希望 `go test` 几秒跑完——但集成测试要起 PG/Redis 容器，几十秒到几分钟。用 build tag 把它们分开，单测随时跑、集成测试 CI 才跑。
 
 ## 6.8 testcontainers-go
 用代码动态启容器跑测试，结束自动清理：
@@ -61,7 +68,8 @@ for c, want := range cases {
 pg, _ := postgres.Run(ctx, "postgres:16-alpine", ...)
 defer pg.Terminate(ctx)
 ```
-每个测试自己的 PG 容器，端口随机分配——绝不会"昨天的数据污染今天"。
+每个测试自己的 PG 容器，端口随机分配——绝不会"昨天的数据污染今天"。  
+**为什么需要**：传统集成测试要么"假设机器上有 PG"——CI 跑挂、新人电脑跑挂；要么用 mock——测了个寂寞（mock 行为和真 PG 不一致）。testcontainers 让每个测试有独立真实 PG，环境干净且高保真。
 
 ## 6.9 mock / fake / stub
 | 类型 | 行为 |
@@ -71,4 +79,5 @@ defer pg.Terminate(ctx)
 | **mock** | 验证调用方式（被调几次、参数对不对） |
 
 类比：stub=假人模特，fake=玩具厨房，mock=监视器。  
-service 单测时 mock repository 和 gateway，不真起 DB / 不真调 LLM。
+service 单测时 mock repository 和 gateway，不真起 DB / 不真调 LLM。  
+**为什么需要**：单元测试要快——不该真调豆包 / 真起数据库。用假实现替代真依赖，让测试能在毫秒级跑完且结果稳定。
