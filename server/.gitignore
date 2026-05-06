@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/aibao-server
+*.exe
+*.test
+*.out
+
+# Logs
+/logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Sensitive config
+config.prod.yaml
+config.local.yaml
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
