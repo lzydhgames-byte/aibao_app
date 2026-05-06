@@ -53,3 +53,11 @@ return fmt.Errorf("read config %s: %w", path, err)
 
 ## 2.10 `_ = something` 显式忽略
 告诉 errcheck linter "我故意不用这个返回值"。要附简短注释说明为什么不关心。
+
+## 2.11 `sync.Mutex` / `sync.RWMutex` 锁
+多 goroutine 同时访问共享变量时防止竞态。  
+- `sync.Mutex` —— 互斥锁，**任何时候只能一个**进
+- `sync.RWMutex` —— 读写锁，**多个读并行 OK，写独占**
+
+**类比 RWMutex**：图书馆——多人同时看一本书 OK，但有人借走（写）时其他人得等。  
+项目体现：logger 包用 RWMutex 保护全局 default logger 引用——启动时写一次，运行中所有 goroutine 高并发读。
