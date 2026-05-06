@@ -64,7 +64,29 @@ return fmt.Errorf("read config %s: %w", path, err)
 告诉 errcheck linter "我故意不用这个返回值"。要附简短注释说明为什么不关心。  
 **为什么需要**：errcheck 启用后，没处理的错误会被当 bug 报错。但有些场景错误真的可以忽略（比如关闭已关闭的资源）。`_ = ...` 是"我知道有错误，故意忽略"的明确表达，比悄悄不写好得多。
 
-## 2.11 `sync.Mutex` / `sync.RWMutex` 锁
+## 2.11 `iota` 自动编号常量
+```go
+const (
+    CodeInvalidArgument Code = iota + 1   // 1
+    CodeUnauthenticated                    // 2
+    CodePermissionDenied                   // 3
+)
+```
+在 const 块里 `iota` 从 0 开始自增，每行 +1。`+1` 让我们从 1 起步。  
+**为什么需要**：手写 `=1, =2, =3` 容易写错（漏了一个、重复了一个）。`iota` 让编译器自动管编号，加新常量只需在中间插一行，所有后面的自动顺移。
+
+## 2.12 `errors.Is` 和 `errors.As`
+- `errors.Is(err, target)` —— "err 链路里是不是有 target 这个错误？"
+- `errors.As(err, &myType)` —— "err 链路里有没有 myType 类型的错误？有就提取出来"
+
+```go
+if errors.Is(err, sql.ErrNoRows) { ... }     // 判断
+var appErr *AppError
+if errors.As(err, &appErr) { ... }           // 提取
+```
+**为什么需要**：错误经过 `%w` 层层包装后，最外层 err 不是底层那个原始错误了。`Is/As` 透过包装链找到目标——你不用手动 unwrap N 次。
+
+## 2.13 `sync.Mutex` / `sync.RWMutex` 锁
 多 goroutine 同时访问共享变量时防止竞态。  
 - `sync.Mutex` —— 互斥锁，**任何时候只能一个**进
 - `sync.RWMutex` —— 读写锁，**多个读并行 OK，写独占**

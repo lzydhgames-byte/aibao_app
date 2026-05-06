@@ -56,7 +56,20 @@ COMMIT;
 项目体现：Task 18 main.go 监听 SIGTERM。  
 **为什么需要**：发版时进程要重启——如果不优雅关停，正在生成故事的用户会突然失败。优雅关停给在途请求 30 秒"收尾时间"，用户感知不到部署过程。
 
-## 5.9 软件分层与依赖方向
+## 5.9 业务错误码与 HTTP 状态码解耦（AppError 模式）
+service 层抛错时怎么告诉 api 层"返 400 还是 500"？三种做法：
+- ❌ service 直接调 `c.JSON(400, ...)` —— 业务依赖 HTTP 框架，污染分层
+- ❌ 返回字符串错误 —— api 层凭字符串猜状态码
+- ✅ 定义 `AppError`：含业务 Code（枚举） + UserMsg + `HTTPStatus()` 方法
+
+```go
+return errors.New(errors.CodeNotFound, "child_not_found", "未找到孩子档案")
+```
+api 层 `errors.As` 解出来一查就知道返 404。  
+**为什么需要**：让 service 层完全不依赖 HTTP 框架——单元测试不用起 Gin，将来加 CLI/cron 入口也复用同一段业务。这是 [5.2 依赖倒置](#52-依赖倒置dip) 的具体落地。  
+项目体现：`internal/pkg/errors` 包定义 7 种 Code 自动映射到 7 种 HTTP 状态。
+
+## 5.10 软件分层与依赖方向
 ```
 api → service → repository + gateway → pkg
 ```
