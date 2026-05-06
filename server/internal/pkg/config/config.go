@@ -7,6 +7,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+// envPrefix is the environment variable prefix for config overrides.
+// Example: server.port → AIBAO_SERVER_PORT, postgres.password → AIBAO_POSTGRES_PASSWORD.
+const envPrefix = "AIBAO"
+
 // Config is the root application configuration loaded from yaml + env.
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server"`
@@ -38,13 +42,18 @@ type RedisConfig struct {
 	DB       int    `mapstructure:"db"`
 }
 
-// Load reads config from file and overlays env vars (prefix AIBAO_).
+// Load reads config from file and overlays env vars (prefix envPrefix + "_").
 // Env naming: AIBAO_SERVER_PORT, AIBAO_POSTGRES_PASSWORD, etc.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
-	v.SetEnvPrefix("AIBAO")
+	v.SetEnvPrefix(envPrefix)
+	// AutomaticEnv alone does NOT make Unmarshal see env-only keys (e.g. postgres.password
+	// when the field isn't present in the file). The BindEnv loop below registers each key
+	// explicitly so Unmarshal will read it from env.
 	v.AutomaticEnv()
+	// Replace dots with underscores: viper key "postgres.password" → env "POSTGRES_PASSWORD".
+	// Combined with the prefix, the final env var becomes AIBAO_POSTGRES_PASSWORD.
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	if err := v.ReadInConfig(); err != nil {
@@ -66,21 +75,21 @@ func Load(path string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
-	if err := validate(&cfg); err != nil {
+	if err := applyDefaultsAndValidate(&cfg, path); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-func validate(c *Config) error {
+func applyDefaultsAndValidate(c *Config, path string) error {
 	if c.Server.Port == 0 {
-		return fmt.Errorf("server.port is required")
+		return fmt.Errorf("config %s: server.port is required", path)
 	}
 	if c.Postgres.Host == "" {
-		return fmt.Errorf("postgres.host is required")
+		return fmt.Errorf("config %s: postgres.host is required", path)
 	}
 	if c.Redis.Addr == "" {
-		return fmt.Errorf("redis.addr is required")
+		return fmt.Errorf("config %s: redis.addr is required", path)
 	}
 	if c.Server.LogLevel == "" {
 		c.Server.LogLevel = "info"
