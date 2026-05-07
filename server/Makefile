@@ -12,7 +12,12 @@ build:
 	$(GO) build -o $(BINARY) ./cmd/server
 
 run-dev: build
-	AIBAO_CONFIG=$(CONFIG_DEV) AIBAO_POSTGRES_PASSWORD=aibao ./$(BINARY)
+	AIBAO_CONFIG=$(CONFIG_DEV) \
+	AIBAO_POSTGRES_PASSWORD=aibao \
+	AIBAO_AUTH_JWT_SECRET=dev-jwt-secret-change-me \
+	AIBAO_CRYPTO_PHONE_AES_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+	AIBAO_CRYPTO_SAFEHASH_SALT=dev-safehash-salt \
+	./$(BINARY)
 
 test:
 	$(GO) test -race -count=1 -cover $(PKG)
