@@ -95,12 +95,44 @@
 - **轻量 Metrics**：Prometheus 客户端暴露 `/metrics` 端点（仅 127.0.0.1），覆盖 SLO 关键指标；server 暂不部署
 - **children 一期 UNIQUE(user_id)**：DB 层强制单孩子约束，防御重试/并发/脚本误用
 
+## 已实现的能力（不要重做）
+
+### Plan 1（2026-05-07 完成，21 Task）后端基础设施
+- Go 项目骨架（cmd / internal / migrations / config）
+- 三层架构（api/service/repository）+ Gateway 抽象目录
+- 7 个 pkg 工具包：config / traceid / safehash / logger / errors / metrics / api
+- 4 个 HTTP 中间件：recover / traceid / logger / metrics
+- DB（GORM + PG）+ Redis 客户端
+- 端点：`/health` `/ready` `/metrics`
+- 数据库迁移工具 + `infra_check` 占位表
+- main.go 优雅关停
+- 平均覆盖率 ~89%，0 lint issues
+
+### Plan 2（2026-05-07 完成，20 Task）用户认证 + 孩子档案
+- users / children 表（含 `UNIQUE(user_id)` 一期单孩子约束）
+- 手机号验证码登录（Mock SMS，固定码 `123456`，60s 冷却，5min TTL）
+- JWT（HS256，access 24h / refresh 7d，Type 字段防混用）
+- 手机号双存：safehash（查询）+ AES-256-GCM（加密原文）
+- 孩子档案 CRUD（含部分更新 PATCH 用指针字段）
+- JWTAuth 中间件 + AppError → HTTP 状态码自动映射
+- 端到端冒烟通过：sms.send → login → me → POST/GET/PATCH children → 401/409 全验证
+- 平均覆盖率 ~85%，0 lint issues
+
+### Plan 3（2026-05-07 规划完成，待执行，12 Task）双层安全 + Prompt 模板
+**已决策但未实施**：
+- 红线词库 200+ 词、6 大类，YAML 启动加载
+- IntentProvider 接口（一期 NoopProvider 默认；Plan 4 接 LLM 兜底）
+- IP 同人化白名单（12 主流儿童 IP）+ 黑名单（限制级动漫/政治宗教）
+- PreCheck 5 类拦截 + PostCheck 3 类拦截（含主角身份启发式）
+- System Prompt 模板含 8 条强约束
+- `cmd/safetycheck` demo 工具
+
 ## 待决策项
 
 - 域名（发布前再注册，debug 阶段用 IP）
 - App Store 上架主体（个人/公司）
 - 教育主题库 50-100 主题具体清单
-- 真实 IP（如奥特曼）法务策略
+- 真实 IP（如奥特曼）法务策略（白名单同人化方案已起步，法务复核待做）
 - 订阅定价
 - 儿童数据境内合规方案（大陆正式上线前必须迁境内）
 - 商业模式：免费/订阅/付费档位
@@ -108,4 +140,18 @@
 ## 决策时间线
 
 - **2026-04-28** — 完成产品 brainstorming，输出一期 MVP 产品 spec
-- **2026-04-28** — 完成技术架构 brainstorming，输出技术架构文档
+- **2026-04-28** — 完成技术架构 brainstorming，输出技术架构文档（v1.1 含 Codex review）
+- **2026-04-28** — 完成 Plan 1 实现规划（后端基础设施）
+- **2026-05-07** — Plan 1 全部 21 Task 完成，端到端冒烟通过
+- **2026-05-07** — 完成 Plan 2 实现规划 + 全部 20 Task 实施，端到端冒烟通过
+- **2026-05-07** — 知识库补全 Plan 2 涉及的 12 个新概念（10 主题 100+ 词条）
+- **2026-05-07** — 完成 Plan 3 实现规划（双层安全 + Prompt 模板，待执行）
+
+## 关键技术教训（来自实施过程）
+
+- **Windows HTTP 全局代理坑**：本机 `http_proxy=127.0.0.1:18081` 会拦截 curl 并改 body。任何本地 smoke test 必须 `curl --noproxy "*"`
+- **Go 二进制必须重新 build**：每次实施完 Task 改了 main/router/handler 后，跑 smoke 前必须 `go build` 一次。`bin/aibao-server` 没刷新会导致"代码改了但路由还是旧的"
+- **testcontainers v0.42 API 变化**：`WithWaitStrategyAndDeadline` 弃用，改 `wait.ForLog` / `wait.ForListeningPort`
+- **Windows 下无法验证 graceful shutdown**：`taskkill -F` 是 SIGKILL，验不了 SIGTERM 流程；生产环境（Linux+systemd）才能真验
+- **viper Unmarshal 不读 env-only 字段**：必须显式 `BindEnv` 列表
+- **golangci-lint v2 schema 与 v1 不兼容**：formatters 单独分组，`gosimple` 合到 `staticcheck`

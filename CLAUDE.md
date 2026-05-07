@@ -10,10 +10,30 @@
 
 ## 2. 当前阶段
 
-**brainstorming → spec 已完成（一期 MVP）**
-当前下一步：写实现规划（writing-plans），技术架构尚待 brainstorm。
+**Plan 1 + Plan 2 已实现并通过端到端冒烟；Plan 3 实现规划已写完待执行。**
+当前下一步：执行 Plan 3（双层安全 + Prompt 模板，12 Task）。
 
-权威设计文档：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)
+权威文档：
+- 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)
+- 技术架构 spec：[docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md](docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md)
+- 已完成的 Plan 1：[docs/superpowers/plans/2026-04-28-plan-01-backend-infrastructure.md](docs/superpowers/plans/2026-04-28-plan-01-backend-infrastructure.md)
+- 已完成的 Plan 2：[docs/superpowers/plans/2026-05-07-plan-02-auth-and-child-profile.md](docs/superpowers/plans/2026-05-07-plan-02-auth-and-child-profile.md)
+- 待执行的 Plan 3：[docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md](docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md)
+
+### 已落地的能力（不要重做）
+- 后端骨架（Go + Gin + GORM + slog + Prometheus + 健康检查 + 优雅关停）
+- 三层架构（api/service/repository）+ Gateway 抽象层目录就位
+- 用户认证：手机号 + 验证码 + JWT（access 24h / refresh 7d）
+- 孩子档案：CRUD + 一期 `UNIQUE(user_id)` 约束
+- 手机号双存（safehash + AES-256-GCM）
+- 知识库 10 主题 100+ 词条（用户复盘用）
+
+### 端到端可演示接口（已通过冒烟）
+- `GET /health` `GET /ready` `GET /metrics`
+- `POST /api/v1/auth/sms/send`
+- `POST /api/v1/auth/login_or_register`
+- `GET /api/v1/me`（需 Bearer JWT）
+- `POST/GET/PATCH /api/v1/children`（需 Bearer JWT）
 
 ## 3. 产品架构核心约定
 
