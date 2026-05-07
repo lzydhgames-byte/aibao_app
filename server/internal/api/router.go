@@ -7,6 +7,7 @@ import (
 
 	"github.com/aibao/server/internal/api/middleware"
 	"github.com/aibao/server/internal/metrics"
+	"github.com/aibao/server/internal/pkg/jwtauth"
 )
 
 // RouterDeps groups everything NewRouter needs from main.go. Pulling these
@@ -16,12 +17,19 @@ type RouterDeps struct {
 	Reg     *prometheus.Registry
 	PG      Checker
 	Redis   Checker
+
+	// Auth-related (Plan 2)
+	JWT   *jwtauth.Manager
+	Auth  *AuthHandler
+	Me    *MeHandler
+	Child *ChildHandler
 }
 
 // NewRouter builds the gin.Engine with the standard middleware chain,
-// health/ready endpoints, and the /metrics scrape endpoint. Order of
-// middleware matters: Recover must be outermost so it can catch panics
-// from any later middleware or handler.
+// health/ready endpoints, /metrics scrape, and (when Plan 2 deps are
+// supplied) the /api/v1 routes split into public and JWT-protected groups.
+// Order of middleware matters: Recover must be outermost so it can catch
+// panics from any later middleware or handler.
 func NewRouter(deps RouterDeps) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -36,6 +44,24 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 	RegisterHealth(r, deps.PG, deps.Redis)
 
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(deps.Reg, promhttp.HandlerOpts{})))
+
+	// Public v1 routes
+	v1 := r.Group("/api/v1")
+	if deps.Auth != nil {
+		deps.Auth.RegisterRoutes(v1)
+	}
+
+	// Authenticated v1 routes
+	if deps.JWT != nil {
+		auth := r.Group("/api/v1")
+		auth.Use(middleware.JWTAuth(deps.JWT))
+		if deps.Me != nil {
+			deps.Me.RegisterRoutes(auth)
+		}
+		if deps.Child != nil {
+			deps.Child.RegisterRoutes(auth)
+		}
+	}
 
 	return r
 }

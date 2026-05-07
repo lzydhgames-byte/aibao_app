@@ -19,10 +19,16 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/aibao/server/internal/api"
+	"github.com/aibao/server/internal/gateway/sms"
 	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/pkg/config"
+	"github.com/aibao/server/internal/pkg/jwtauth"
 	"github.com/aibao/server/internal/pkg/logger"
+	"github.com/aibao/server/internal/pkg/phonecrypt"
+	"github.com/aibao/server/internal/pkg/safehash"
 	"github.com/aibao/server/internal/repository"
+	authsvc "github.com/aibao/server/internal/service/auth"
+	childsvc "github.com/aibao/server/internal/service/child"
 )
 
 func main() {
@@ -56,11 +62,57 @@ func run() error {
 	}
 	defer repository.Close(db)
 
+	if err := repository.RunMigrations(db, "migrations"); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+
 	rdb, err := repository.NewRedis(cfg.Redis)
 	if err != nil {
 		return fmt.Errorf("init redis: %w", err)
 	}
 	defer func() { _ = rdb.Close() }()
+
+	// Build domain dependencies (Plan 2).
+	hasher := safehash.New(cfg.Crypto.SafehashSalt)
+	pcipher, err := phonecrypt.New(cfg.Crypto.PhoneAESKey)
+	if err != nil {
+		return fmt.Errorf("init phone cipher: %w", err)
+	}
+	jwtMgr := jwtauth.New(
+		cfg.Auth.JWTSecret,
+		time.Duration(cfg.Auth.AccessTTLMinutes)*time.Minute,
+		time.Duration(cfg.Auth.RefreshTTLMinutes)*time.Minute,
+	)
+
+	userRepo := repository.NewUserRepo(db)
+	childRepo := repository.NewChildRepo(db)
+	codeStore := authsvc.NewRedisCodeStore(rdb)
+
+	mockSMS := sms.NewMock()
+	var smsSender authsvc.SMS
+	switch cfg.SMS.Provider {
+	case "mock", "":
+		smsSender = mockSMS
+	default:
+		return fmt.Errorf("unknown sms provider: %s", cfg.SMS.Provider)
+	}
+
+	authService := authsvc.New(authsvc.Deps{
+		Users:        userRepo,
+		CodeStore:    codeStore,
+		SMS:          smsSender,
+		JWT:          jwtMgr,
+		PhoneCipher:  pcipher,
+		Hasher:       hasher,
+		FixedDevCode: mockSMS.FixedCode(),
+		CodeTTL:      time.Duration(cfg.SMS.CodeTTLSeconds) * time.Second,
+		Cooldown:     time.Duration(cfg.SMS.ResendCooldownSec) * time.Second,
+	})
+	childService := childsvc.New(childRepo)
+
+	authHandler := api.NewAuthHandler(authService)
+	meHandler := api.NewMeHandler(userRepo)
+	childHandler := api.NewChildHandler(childService)
 
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -74,6 +126,10 @@ func run() error {
 		Reg:     reg,
 		PG:      pgChecker{db: db},
 		Redis:   redisChecker{c: rdb},
+		JWT:     jwtMgr,
+		Auth:    authHandler,
+		Me:      meHandler,
+		Child:   childHandler,
 	})
 
 	srv := &http.Server{
