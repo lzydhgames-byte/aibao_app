@@ -1,0 +1,22 @@
+[Unit]
+Description=Aibao Server
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=aibao
+Group=aibao
+WorkingDirectory=/opt/aibao
+EnvironmentFile=/etc/aibao/aibao.env
+ExecStart=/opt/aibao/bin/aibao-server
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+LimitNOFILE=65536
+# Memory soft limit 400 MiB
+Environment=GOMEMLIMIT=400MiB
+
+[Install]
+WantedBy=multi-user.target
