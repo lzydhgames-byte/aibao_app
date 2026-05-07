@@ -15,3 +15,17 @@ redis:
   addr: 127.0.0.1:6379
   db: 0
   # password: from env AIBAO_REDIS_PASSWORD
+
+auth:
+  access_ttl_minutes: 1440
+  refresh_ttl_minutes: 10080
+  # jwt_secret: from env AIBAO_AUTH_JWT_SECRET
+
+sms:
+  provider: mock
+  code_ttl_seconds: 300
+  resend_cooldown_sec: 60
+
+crypto:
+  # phone_aes_key: from env AIBAO_CRYPTO_PHONE_AES_KEY (64 hex chars = 32 bytes)
+  # safehash_salt: from env AIBAO_CRYPTO_SAFEHASH_SALT

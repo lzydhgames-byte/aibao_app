@@ -25,6 +25,17 @@ postgres:
   user: aibao
 redis:
   addr: 127.0.0.1:6379
+auth:
+  jwt_secret: dev-secret
+  access_ttl_minutes: 1440
+  refresh_ttl_minutes: 10080
+sms:
+  provider: mock
+  code_ttl_seconds: 300
+  resend_cooldown_sec: 60
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: dev-salt
 `), 0o600))
 	return path
 }
@@ -83,11 +94,69 @@ postgres:
   user: aibao
 redis:
   addr: 127.0.0.1:6379
+auth:
+  jwt_secret: x
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: salt
 `), 0o600))
 
 	cfg, err := Load(path)
 	require.NoError(t, err)
 	assert.Equal(t, "info", cfg.Server.LogLevel, "LogLevel should default to info when empty")
+}
+
+func TestLoad_AuthAndSMSDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+  log_dir: /tmp/aibao
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+redis:
+  addr: 127.0.0.1:6379
+auth:
+  jwt_secret: x
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: salt
+`), 0o600))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, 1440, cfg.Auth.AccessTTLMinutes)
+	assert.Equal(t, 10080, cfg.Auth.RefreshTTLMinutes)
+	assert.Equal(t, "mock", cfg.SMS.Provider)
+	assert.Equal(t, 300, cfg.SMS.CodeTTLSeconds)
+	assert.Equal(t, 60, cfg.SMS.ResendCooldownSec)
+}
+
+func TestLoad_MissingJWTSecret(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+redis:
+  addr: 127.0.0.1:6379
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: salt
+`), 0o600))
+
+	_, err := Load(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth.jwt_secret")
 }
 
 func TestLoad_MalformedYAML(t *testing.T) {
