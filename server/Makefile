@@ -12,7 +12,7 @@ build:
 	$(GO) build -o $(BINARY) ./cmd/server
 
 run-dev: build
-	AIBAO_CONFIG=$(CONFIG_DEV) ./$(BINARY)
+	AIBAO_CONFIG=$(CONFIG_DEV) AIBAO_POSTGRES_PASSWORD=aibao ./$(BINARY)
 
 test:
 	$(GO) test -race -count=1 -cover $(PKG)
