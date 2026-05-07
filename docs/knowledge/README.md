@@ -17,15 +17,15 @@
 | 文件 | 内容 |
 |---|---|
 | [01-git.md](01-git.md) | Git 仓库、commit、分支、`.gitignore`、commit message 惯例、`.gitkeep` |
-| [02-go-language.md](02-go-language.md) | Go 模块、module path、`internal/` 目录、struct tag、context、ctxKey 技巧 |
+| [02-go-language.md](02-go-language.md) | module path、`internal/`、context、struct tag、错误包装、iota、errors.Is/As、Mutex、regex、指针 PATCH |
 | [03-go-engineering.md](03-go-engineering.md) | Go 项目结构、三层架构、Makefile、go.mod / go.sum、go install / -tags |
 | [04-docker.md](04-docker.md) | Docker、容器 vs 虚拟机、docker-compose、绑定 127.0.0.1 |
-| [05-software-design.md](05-software-design.md) | 关注点分离、依赖倒置 (DIP)、YAGNI、Outbox Pattern、12-Factor App、Pets vs Cattle |
-| [06-testing.md](06-testing.md) | TDD 循环、单元测试 vs 集成测试、`t.TempDir`、`t.Setenv`、覆盖率 |
-| [07-http-and-web.md](07-http-and-web.md) | （后续 Task 引入）|
-| [08-database.md](08-database.md) | （后续 Task 引入） |
-| [09-observability.md](09-observability.md) | 结构化日志、TraceID、指标 vs 日志（后续完善）|
-| [10-security-and-compliance.md](10-security-and-compliance.md) | 密钥管理、敏感字段脱敏、签名 URL（后续完善）|
+| [05-software-design.md](05-software-design.md) | 关注点分离、依赖倒置 (DIP)、YAGNI、Outbox Pattern、12-Factor App、Pets vs Cattle、AppError 模式 |
+| [06-testing.md](06-testing.md) | TDD 循环、单元/集成/E2E、`t.TempDir`、`t.Setenv`、testify、表驱动、testcontainers |
+| [07-http-and-web.md](07-http-and-web.md) | 中间件、洋葱模型、Gin、状态码全集、Bearer 认证、CRUD（PATCH vs PUT） |
+| [08-database.md](08-database.md) | PG/ORM/连接池、migration（含 golang-migrate 实操）、GORM、Redis 数据结构、TTL/LRU、SETNX/GETDEL |
+| [09-observability.md](09-observability.md) | 结构化日志、TraceID、lumberjack、Prometheus 三类指标、SLO |
+| [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce |
 
 ---
 

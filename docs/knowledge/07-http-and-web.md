@@ -44,14 +44,51 @@ defer func() {
 **为什么需要**：用户 App 报错时贴出一段日志，里面有 traceId——后端 grep 这个 ID 能立刻定位到具体那次请求。这是"用户报错支持流程"的关键基础。
 
 ## 7.6 RESTful API 与状态码
-HTTP 状态码语义化分类：
-| 类 | 含义 | 例 |
+HTTP 状态码语义化分类（项目里实际用到的）：
+| 码 | 含义 | 项目里何时用 |
 |---|---|---|
-| 2xx | 成功 | 200 OK / 201 Created / 204 No Content |
-| 4xx | 客户端错（你传错了） | 400 / 401 / 403 / 404 / 429 |
-| 5xx | 服务器错（我们的锅） | 500 / 503 |
+| **200 OK** | 成功（已有结果返回） | GET / PATCH 成功 |
+| **201 Created** | 成功创建了资源 | POST 创建孩子档案成功 |
+| **204 No Content** | 成功但无返回体 | DELETE 成功（暂未用到） |
+| **400 Bad Request** | 客户端传参错了 | JSON 格式错 / 手机号格式错 / 生日格式错 |
+| **401 Unauthorized** | 没认证 / 认证失败 | 没带 token / token 过期 / 验证码错 |
+| **403 Forbidden** | 已认证但没权限 | 用户 A 想改用户 B 的孩子（not_owner） |
+| **404 Not Found** | 资源不存在 | child_not_found / 路由不存在 |
+| **409 Conflict** | 资源冲突 | 一期单孩子约束：第二次 POST /children |
+| **429 Too Many Requests** | 频率超限 | sms.send 60s 内重发 |
+| **500 Internal Server Error** | 服务器崩了 | panic / 未预期错误 |
+| **503 Service Unavailable** | 暂时不可用 | 预算熔断 / 依赖服务挂掉 |
 
-**为什么需要标准**：客户端拿到响应不需要解析 body 也能粗略判断"该重试还是放弃还是用户输入有误"。
+**为什么需要标准化**：客户端拿到响应不需要解析 body 也能粗略判断"该重试还是放弃还是用户输入有误"。比如 4xx 重试无意义（参数得改），5xx 可以重试（可能瞬时故障）。  
+项目体现：`apperr.AppError.HTTPStatus()` 把业务错误码（CodeNotFound 等）自动映射到 HTTP 状态。
+
+## 7.7 Bearer Authentication
+HTTP 标准的"携带令牌"格式：
+```
+Authorization: Bearer <token>
+```
+`Bearer`（持有人）的意思是"谁拿到这个 token 谁就是持有人"——**没有额外的身份证明**。所以 token 必须像现金一样保管。  
+**类比**：演唱会票根——撕了一半给你，谁拿着谁能进，丢了就丢了。  
+**为什么需要标准 scheme**：HTTP `Authorization` header 还有 `Basic`（用户名密码 base64）、`Digest`（旧的密码摘要）、`Bearer`（令牌）等多种 scheme，写明 `Bearer` 让 server 知道怎么解析后面的字符串。  
+项目体现：`middleware.JWTAuth` 检查 `strings.HasPrefix(auth, "Bearer ")`，否则 401。
+
+## 7.8 CRUD 与 HTTP 动词（特别讲 PATCH vs PUT）
+REST 资源操作映射：
+| 动词 | CRUD | 语义 | 项目里 |
+|---|---|---|---|
+| **POST** | Create | 新建（id 由服务端生成） | POST /children |
+| **GET** | Read | 查询 | GET /children, GET /me |
+| **PUT** | Replace | **整体替换**整个资源 | 暂未用 |
+| **PATCH** | Update | **部分修改**资源字段 | PATCH /children/:id |
+| **DELETE** | Delete | 删除 | 暂未用 |
+
+**PATCH vs PUT 关键区别**：
+- **PUT** 期望客户端发送**完整资源**——服务端整体替换。少传一个字段 = 那字段被清空
+- **PATCH** 期望客户端只发**要改的字段**——服务端只动这些，其他保留
+
+**类比**：PUT = 重写整本书；PATCH = 在书的某几页贴便签。  
+**为什么 PATCH 更适合"修改部分字段"**：客户端不必先 GET 完整资源、再修改、再 PUT 回去，直接 PATCH 一个字段更省网络且并发安全。  
+项目体现：PATCH /children/:id 的请求体所有字段都用 `*string` 指针类型，`nil` 表示"这个字段不改"。详见 [02.12 指针字段做 PATCH 部分更新](02-go-language.md#212-指针字段做-patch-部分更新)。
 
 ## 7.7 Gin 框架基础
 ```go

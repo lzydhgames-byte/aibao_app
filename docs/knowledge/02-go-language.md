@@ -94,3 +94,31 @@ if errors.As(err, &appErr) { ... }           // 提取
 **类比 RWMutex**：图书馆——多人同时看一本书 OK，但有人借走（写）时其他人得等。  
 **为什么需要**：Go 鼓励并发（goroutine 极便宜），但并发读写同一变量会出 race condition（值乱了甚至程序崩）。锁是最基础的保护手段。RWMutex 比 Mutex 性能好——读多写少的场景（比如全局 logger）允许并发读。  
 项目体现：logger 包用 RWMutex 保护全局 default logger 引用——启动时写一次，运行中所有 goroutine 高并发读。
+
+## 2.14 正则表达式（regex）
+匹配字符串模式的"小型语言"。Go 用 `regexp` 标准库：
+```go
+var phoneRe = regexp.MustCompile(`^1[3-9]\d{9}$`)
+phoneRe.MatchString("13800138000")   // true
+```
+读法：`^` 开头 → `1` 必须以 1 开头 → `[3-9]` 第二位是 3-9 之间一个 → `\d{9}` 后跟 9 个数字 → `$` 结束。  
+**类比**：考试答题卡填字母"必须 ABCDE 之一"——出题模板说哪个位置允许什么。  
+**为什么需要**：用一行模式串就能表达"中国大陆 11 位手机号"这种规则，比 if-else 拼写少 20 行代码。  
+**为什么 `MustCompile` 而不是 `Compile`**：模式串是写死的（不会运行时变），用 Must 版本——出错就直接 panic（启动时就暴露），避免每次调用都判 err。  
+项目体现：auth.Service 用它校验手机号格式。
+
+## 2.15 指针字段做 PATCH 部分更新
+HTTP PATCH 接口经常需要"哪个字段没传就不动"。Go 用**指针类型字段**优雅表达"可选":
+```go
+type updateChildReq struct {
+    Nickname *string `json:"nickname,omitempty"`
+    Gender   *string `json:"gender,omitempty"`
+    Birthday *string `json:"birthday,omitempty"`
+}
+```
+- 客户端传了 `{"nickname": "小宇宙"}` → JSON 解码后 `Nickname` 是非 nil 指针，`Gender`/`Birthday` 是 nil
+- handler 里 `if req.Nickname != nil { ... }` 就能判断"客户端有没有发这个字段"
+
+**为什么不用普通字符串**：普通 `string` 字段默认值是空串 `""`——无法区分"客户端没传"和"客户端传了空串"。指针的零值是 `nil`，能明确区分两者。  
+**类比**：填表——可选字段空着 vs 主动写"无"，意义不同。指针让你能区分这两种情况。  
+项目体现：`PATCH /children/:id` 的 `child.UpdateInput`、`updateChildReq`，配合 `if in.Nickname != nil { c.Nickname = *in.Nickname }`。

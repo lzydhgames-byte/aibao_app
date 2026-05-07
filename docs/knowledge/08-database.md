@@ -34,6 +34,39 @@ migrations/
 工具（如 golang-migrate）按编号顺序执行 `.up.sql`，并维护一张 `schema_migrations` 表记录"现在到哪个版本了"。  
 **为什么需要**：手动改生产数据库 schema = 灾难（忘了步骤、跨环境不一致、回滚不了）。迁移让 schema 变更**可重放、可版本控、可回滚**——和应用代码一样进 git。
 
+### 8.4.1 golang-migrate 实操命令
+```bash
+# 升级到最新版本（执行所有未跑的 .up.sql）
+migrate -path migrations -database "postgres://..." up
+
+# 回滚 1 步
+migrate -path migrations -database "..." down 1
+
+# 查看当前版本
+migrate -path migrations -database "..." version
+
+# 强制设置当前版本（修复"卡在中间"的状态）
+migrate -path migrations -database "..." force <N>
+```
+项目里 `Makefile` 封装了 `make migrate-up` / `make migrate-down`。  
+`main.go` 启动时也调 `repository.RunMigrations(db, "migrations")`——服务每次启动自动跑未应用的迁移，避免"上线前忘了跑迁移"。  
+**为什么 force 命令存在**：如果一个 .up.sql 跑到一半失败（比如某条 SQL 错），版本会卡住。修好 SQL 后用 `force <上一个版本号>` 重置。
+
+### 8.4.2 GORM 基础操作
+ORM = "对象-关系映射"。GORM 把 Go 结构体和 SQL 表对应起来。常见用法：
+```go
+db.Create(&user)                            // INSERT
+db.First(&u, id)                            // SELECT * WHERE id=? LIMIT 1
+db.Where("phone_hash = ?", h).First(&u)     // 带条件查询（参数化防注入）
+db.Save(&user)                              // INSERT or UPDATE
+db.Model(&u).Updates(map[string]any{...})   // 部分更新
+db.Delete(&u)                               // DELETE
+db.WithContext(ctx)                         // 带 context（超时/取消）
+```
+重要：**所有用户输入必须用 `?` 占位符 + 参数**，绝不拼字符串——否则 SQL 注入。  
+**为什么用 GORM**：手写 SQL 容易写错列名、忘了加索引提示、字段改了 SQL 字符串没改也不报错。GORM 让"对象 ↔ 表"映射在编译期就能检查到字段错误。  
+项目体现：`UserRepo` / `ChildRepo` 全部走 GORM；`isUniqueViolation(err)` 把 GORM 抛出的"重复键错误"翻译成 `ErrAlreadyExists`。
+
 ## 8.5 Redis 数据结构
 | 类型 | 用途 |
 |---|---|
@@ -62,3 +95,18 @@ SELECT * FROM outbox_events WHERE status='pending'
 ORDER BY id LIMIT 10 FOR UPDATE SKIP LOCKED;
 ```
 **为什么需要**：传统做法是 SELECT + UPDATE 两步——并发时两个 Worker 可能拿到同一行。`FOR UPDATE` 锁住选中行；`SKIP LOCKED` 让其他 Worker 自动跳过被锁的行——天然并发安全。
+
+## 8.8 Redis 原子操作：SETNX / GETDEL
+Redis 单线程模型让单个命令天然原子，但**两个命令之间**有竞态。下面两个组合命令把"两步合一"做成原子：
+
+- **SETNX**（SET if Not eXists）：仅当 key 不存在时才设值，并返回是否成功。  
+  项目用法：发短信冷却——`SETNX cooldown:138... 1 EX 60`，返 `false` 就意味着 60s 内已发过，拒绝重发
+- **GETDEL**：原子地"读出值并立即删除"。  
+  项目用法：验证码"一次性消费"——`GETDEL code:138...`，读到值就同时删掉，避免被重放使用
+
+**类比**：
+- SETNX = 抢车位——只允许第一个抢到的人占
+- GETDEL = 取快递+签收——一气呵成，不会被别人半路抢走
+
+**为什么不用 SET + DEL 两步**：高并发下两步之间会有窗口期。SETNX/GETDEL 是 Redis 服务端**单条命令**完成，**任何并发都不可能拆开**。  
+项目体现：`auth/codestore_redis.go` 的 `Save`（SETNX cooldown + SET code）和 `Take`（GETDEL code）。
