@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/aibao/server/internal/pkg/config"
 )
@@ -19,7 +20,10 @@ func startRedis(t *testing.T) (*redis.RedisContainer, config.RedisConfig) {
 	t.Helper()
 	ctx := context.Background()
 	c, err := redis.Run(ctx, "redis:7-alpine",
-		tc.WithWaitStrategyAndDeadline(15*time.Second),
+		tc.WithWaitStrategy(
+			wait.ForListeningPort("6379/tcp").
+				WithStartupTimeout(15*time.Second),
+		),
 	)
 	require.NoError(t, err)
 	host, _ := c.Host(ctx)

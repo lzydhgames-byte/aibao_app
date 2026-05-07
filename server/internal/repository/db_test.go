@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/aibao/server/internal/pkg/config"
 )
@@ -22,7 +23,11 @@ func startPG(t *testing.T) (*postgres.PostgresContainer, config.PostgresConfig) 
 		postgres.WithDatabase("aibao"),
 		postgres.WithUsername("aibao"),
 		postgres.WithPassword("aibao"),
-		tc.WithWaitStrategyAndDeadline(30*time.Second),
+		tc.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(30*time.Second),
+		),
 	)
 	require.NoError(t, err)
 	host, _ := pg.Host(ctx)
