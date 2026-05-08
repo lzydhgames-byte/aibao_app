@@ -10,15 +10,15 @@
 
 ## 2. 当前阶段
 
-**Plan 1 + Plan 2 已实现并通过端到端冒烟；Plan 3 实现规划已写完待执行。**
-当前下一步：执行 Plan 3（双层安全 + Prompt 模板，12 Task）。
+**Plan 1 + 2 + 3 全部实现并通过冒烟。**
+当前下一步：写 Plan 4（故事生成 + LLM Gateway + Outbox），需先确认豆包 Pro API Key 是否就位。
 
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)
 - 技术架构 spec：[docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md](docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md)
 - 已完成的 Plan 1：[docs/superpowers/plans/2026-04-28-plan-01-backend-infrastructure.md](docs/superpowers/plans/2026-04-28-plan-01-backend-infrastructure.md)
 - 已完成的 Plan 2：[docs/superpowers/plans/2026-05-07-plan-02-auth-and-child-profile.md](docs/superpowers/plans/2026-05-07-plan-02-auth-and-child-profile.md)
-- 待执行的 Plan 3：[docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md](docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md)
+- 已完成的 Plan 3：[docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md](docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md)
 
 ### 已落地的能力（不要重做）
 - 后端骨架（Go + Gin + GORM + slog + Prometheus + 健康检查 + 优雅关停）
@@ -26,6 +26,9 @@
 - 用户认证：手机号 + 验证码 + JWT（access 24h / refresh 7d）
 - 孩子档案：CRUD + 一期 `UNIQUE(user_id)` 约束
 - 手机号双存（safehash + AES-256-GCM）
+- **双层安全护栏**：PreCheck 6 类拦截 + PostCheck 3 类拦截 + 220 红线词 6 大类 + 12 IP 白名单 + 30 IP 黑名单
+- **System Prompt 模板**：text/template + 8 条强约束 + 11 个动态字段
+- **cmd/safetycheck CLI**：3 个子命令演示安全 + Prompt 装配
 - 知识库 10 主题 100+ 词条（用户复盘用）
 
 ### 端到端可演示接口（已通过冒烟）
@@ -34,6 +37,11 @@
 - `POST /api/v1/auth/login_or_register`
 - `GET /api/v1/me`（需 Bearer JWT）
 - `POST/GET/PATCH /api/v1/children`（需 Bearer JWT）
+
+### CLI 可演示
+- `safetycheck precheck "..."` —— 前置预审
+- `safetycheck postcheck --child=... "..."` —— 后置审核
+- `safetycheck build-prompt --child=... ...` —— 完整 System Prompt 装配
 
 ## 3. 产品架构核心约定
 

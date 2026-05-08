@@ -118,14 +118,16 @@
 - 端到端冒烟通过：sms.send → login → me → POST/GET/PATCH children → 401/409 全验证
 - 平均覆盖率 ~85%，0 lint issues
 
-### Plan 3（2026-05-07 规划完成，待执行，12 Task）双层安全 + Prompt 模板
-**已决策但未实施**：
-- 红线词库 200+ 词、6 大类，YAML 启动加载
-- IntentProvider 接口（一期 NoopProvider 默认；Plan 4 接 LLM 兜底）
-- IP 同人化白名单（12 主流儿童 IP）+ 黑名单（限制级动漫/政治宗教）
-- PreCheck 5 类拦截 + PostCheck 3 类拦截（含主角身份启发式）
-- System Prompt 模板含 8 条强约束
-- `cmd/safetycheck` demo 工具
+### Plan 3（2026-05-08 完成，12 Task）双层安全 + Prompt 模板
+- 红线词库 220 词、6 大类，YAML 启动加载到不可变 RuleSet
+- IntentProvider 接口 + NoopProvider（Plan 4 替换为 LLMProvider）
+- IP 同人化白名单 12 个 + 黑名单 30 个，YAML 管理
+- PreCheck 6 类拦截（长度→危险字符→红线→害怕→IP黑→意图）
+- PostCheck 3 类拦截（红线→害怕→主角身份启发式）
+- System Prompt 模板（text/template + 8 条强约束 + 11 动态字段）
+- `cmd/safetycheck` 3 子命令（precheck/postcheck/build-prompt）
+- 覆盖率 90.9% / 81.2%；Matcher 11µs/op（远低于 1ms 验收）
+- 0 lint issues
 
 ## 待决策项
 
@@ -146,6 +148,7 @@
 - **2026-05-07** — 完成 Plan 2 实现规划 + 全部 20 Task 实施，端到端冒烟通过
 - **2026-05-07** — 知识库补全 Plan 2 涉及的 12 个新概念（10 主题 100+ 词条）
 - **2026-05-07** — 完成 Plan 3 实现规划（双层安全 + Prompt 模板，待执行）
+- **2026-05-08** — Plan 3 全部 12 Task 完成，CLI demo 通过；覆盖率 90.9%/81.2%
 
 ## 关键技术教训（来自实施过程）
 
