@@ -26,6 +26,7 @@
 | [08-database.md](08-database.md) | PG/ORM/连接池、migration（含 golang-migrate 实操）、GORM、Redis 数据结构、TTL/LRU、SETNX/GETDEL |
 | [09-observability.md](09-observability.md) | 结构化日志、TraceID、lumberjack、Prometheus 三类指标、SLO |
 | [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce |
+| [11-llm-engineering.md](11-llm-engineering.md) | Token、System/User Prompt、Temperature、流式 vs 整体、Fallback、上下文窗口、前缀缓存 |
 
 ---
 

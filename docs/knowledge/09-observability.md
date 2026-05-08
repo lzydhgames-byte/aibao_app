@@ -94,3 +94,22 @@ MVP 阶段不部署 Prometheus server——需要时 `curl 127.0.0.1:8080/metric
 
 必须靠 metrics 算，不靠"感觉今天还行吧"。  
 **为什么需要**：没 SLO 时优化是凭感觉——"好像变慢了？""错误是不是多了？"。有 SLO 后变成具体目标——"P95 突破了 25s，需要排查"——决策有据可依。
+
+## 9.12 业务指标（Business Metrics）
+区别于"基础设施指标"（HTTP 请求数 / Go 协程数等技术性数据），业务指标关注**业务发生了什么**：
+```
+story_generate_total{status}        # 故事生成总数（按成功/失败）
+story_generate_duration_seconds     # 端到端耗时
+llm_call_duration_seconds{provider} # LLM 调用耗时
+safety_fail_total{stage,reason}     # 安全拦截统计
+outbox_pending_count                # 队列堆积
+llm_budget_used_yuan                # 今日预算消耗
+```
+**为什么需要**：监控不只是"服务挂没挂"。业务指标让你能问"过去 5 分钟 P95 是多少？""安全规则今天拦了多少？""今日 LLM 花了多少钱？"——这些都不是基础指标能回答的。
+
+## 9.13 预算熔断（Budget Circuit Breaker）
+每天给外部 API 调用设个上限，超过自动停服防止半夜烧钱。  
+**类比**：信用卡设了"每日消费限额 1000 元"——超过自动拒付。  
+**实现**：Redis key `budget:llm:daily:YYYYMMDD` 累加每次调用的费用估算；每次调外部 API 前检查；超阈值返 503。次日 0 点 key 过期自动重置。  
+**为什么需要**：LLM 按 token 计费，bug 或恶意刷接口能一夜烧光月预算。预算熔断是"宁可拒服务也不破产"的工程化止损。  
+项目策略：100 元/天，足够 1500 次故事生成；超额停服等于"今天测试够了，明天接着来"。
