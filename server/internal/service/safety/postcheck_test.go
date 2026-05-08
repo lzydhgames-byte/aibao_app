@@ -1,0 +1,74 @@
+package safety
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func newTestPostChecker(t *testing.T) *PostChecker {
+	t.Helper()
+	rs := &RuleSet{
+		AllRedlinesFlat: []string{"血腥", "暴力", "鬼"},
+	}
+	return NewPostChecker(rs)
+}
+
+func TestPostCheck_Pass(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门，决定勇敢地走进竹林。爱宝跟在小宇身后，一起冒险。小宇说：'我们去找小恐龙！'于是小宇带着大家一路前行。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+		ChildFearList: nil,
+	})
+	assert.True(t, out.Pass)
+}
+
+func TestPostCheck_RejectRedline(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇遇到了血腥的怪兽，但勇敢地战胜了它。小宇决定继续前行。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "redline_matched", out.RejectReason)
+	assert.Equal(t, "血腥", out.MatchedRule)
+}
+
+func TestPostCheck_RejectFear(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇在花园里看到一只大蜘蛛，决定友好地打招呼。小宇说：你好。小宇笑了。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+		ChildFearList: []string{"蜘蛛"},
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "fear_matched", out.RejectReason)
+	assert.Equal(t, "蜘蛛", out.MatchedRule)
+}
+
+func TestPostCheck_RejectChildAbsent(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "爱宝独自走进竹林，决定一个人冒险。爱宝跑得很快。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "child_not_protagonist", out.RejectReason)
+}
+
+func TestPostCheck_RejectChildPassive(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := strings.Repeat("爱宝跑了。爱宝跳了。爱宝笑了。", 10) + "小宇也在场。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "child_not_protagonist", out.RejectReason)
+}
