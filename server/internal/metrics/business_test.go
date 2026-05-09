@@ -1,0 +1,47 @@
+package metrics
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestBusinessMetrics_Registered(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	bm := NewBusiness(reg)
+	require.NotNil(t, bm)
+
+	bm.StoryGenerateTotal.WithLabelValues("ok").Inc()
+	bm.StoryGenerateDuration.Observe(12.3)
+	bm.LLMCallDuration.WithLabelValues("doubao").Observe(8.0)
+	bm.LLMCallTotal.WithLabelValues("doubao", "ok").Inc()
+	bm.SafetyFailTotal.WithLabelValues("pre", "redline_matched").Inc()
+	bm.OutboxPendingCount.Set(3)
+	bm.OutboxDeadTotal.WithLabelValues("memory_update").Inc()
+	bm.LLMBudgetUsedYuan.Set(12.5)
+	bm.ExternalAPIErrorTotal.WithLabelValues("doubao").Inc()
+
+	mf, err := reg.Gather()
+	require.NoError(t, err)
+	names := make([]string, 0, len(mf))
+	for _, f := range mf {
+		names = append(names, f.GetName())
+	}
+	joined := strings.Join(names, ",")
+	for _, want := range []string{
+		"story_generate_total",
+		"story_generate_duration_seconds",
+		"llm_call_duration_seconds",
+		"llm_call_total",
+		"safety_fail_total",
+		"outbox_pending_count",
+		"outbox_dead_total",
+		"llm_budget_used_yuan",
+		"external_api_error_total",
+	} {
+		assert.Contains(t, joined, want, "missing metric %s", want)
+	}
+}
