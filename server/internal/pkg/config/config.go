@@ -21,6 +21,35 @@ type Config struct {
 	Crypto   CryptoConfig   `mapstructure:"crypto"`
 	LLM      LLMConfig      `mapstructure:"llm"`
 	Worker   WorkerConfig   `mapstructure:"worker"`
+	TTS      TTSConfig      `mapstructure:"tts"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+}
+
+// TTSConfig holds TTS provider parameters.
+type TTSConfig struct {
+	Provider       string  `mapstructure:"provider"`        // "minimax" / "mock"
+	BaseURL        string  `mapstructure:"base_url"`        // https://api.minimax.chat
+	GroupID        string  `mapstructure:"group_id"`        // env AIBAO_TTS_MINIMAX_GROUP_ID
+	APIKey         string  `mapstructure:"api_key"`         // env AIBAO_TTS_MINIMAX_API_KEY
+	Model          string  `mapstructure:"model"`           // "speech-01-turbo"
+	VoiceID        string  `mapstructure:"voice_id"`        // "female-tianmei"
+	Format         string  `mapstructure:"format"`          // "mp3"
+	SampleRate     int     `mapstructure:"sample_rate"`     // 32000
+	Bitrate        int     `mapstructure:"bitrate"`         // 128000
+	Speed          float64 `mapstructure:"speed"`           // 1.0
+	TimeoutSeconds int     `mapstructure:"timeout_seconds"` // 60
+}
+
+// StorageConfig holds object storage provider parameters.
+type StorageConfig struct {
+	Provider         string `mapstructure:"provider"`               // "cos" / "mock"
+	Bucket           string `mapstructure:"bucket"`                 // env AIBAO_STORAGE_COS_BUCKET
+	Region           string `mapstructure:"region"`                 // ap-shanghai
+	AppID            string `mapstructure:"app_id"`                 // env AIBAO_STORAGE_COS_APPID
+	SecretID         string `mapstructure:"secret_id"`              // env AIBAO_STORAGE_COS_SECRET_ID
+	SecretKey        string `mapstructure:"secret_key"`             // env AIBAO_STORAGE_COS_SECRET_KEY
+	PresignedTTLSec  int    `mapstructure:"presigned_ttl_seconds"`  // 900 (15min)
+	UploadTimeoutSec int    `mapstructure:"upload_timeout_seconds"` // 30
 }
 
 // LLMConfig holds LLM provider parameters.
@@ -133,6 +162,12 @@ func Load(path string) (*Config, error) {
 		"llm.generate_rpm",
 		"worker.enabled", "worker.poll_interval_seconds", "worker.batch_size",
 		"worker.max_attempts", "worker.backoff_base_seconds", "worker.backoff_max_seconds",
+		"tts.provider", "tts.base_url", "tts.group_id", "tts.api_key",
+		"tts.model", "tts.voice_id", "tts.format", "tts.sample_rate",
+		"tts.bitrate", "tts.speed", "tts.timeout_seconds",
+		"storage.provider", "storage.bucket", "storage.region", "storage.app_id",
+		"storage.secret_id", "storage.secret_key",
+		"storage.presigned_ttl_seconds", "storage.upload_timeout_seconds",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -234,6 +269,65 @@ func applyDefaultsAndValidate(c *Config, path string) error {
 	}
 	if c.Worker.BackoffMaxSeconds == 0 {
 		c.Worker.BackoffMaxSeconds = 600
+	}
+	if c.TTS.Provider == "" {
+		c.TTS.Provider = "minimax"
+	}
+	if c.TTS.Provider == "minimax" {
+		if c.TTS.GroupID == "" {
+			return fmt.Errorf("config %s: tts.group_id is required (set AIBAO_TTS_MINIMAX_GROUP_ID)", path)
+		}
+		if c.TTS.APIKey == "" {
+			return fmt.Errorf("config %s: tts.api_key is required (set AIBAO_TTS_MINIMAX_API_KEY)", path)
+		}
+	}
+	if c.TTS.BaseURL == "" {
+		c.TTS.BaseURL = "https://api.minimax.chat"
+	}
+	if c.TTS.Model == "" {
+		c.TTS.Model = "speech-01-turbo"
+	}
+	if c.TTS.VoiceID == "" {
+		c.TTS.VoiceID = "female-tianmei" // TBD-confirm in Minimax console
+	}
+	if c.TTS.Format == "" {
+		c.TTS.Format = "mp3"
+	}
+	if c.TTS.SampleRate == 0 {
+		c.TTS.SampleRate = 32000
+	}
+	if c.TTS.Bitrate == 0 {
+		c.TTS.Bitrate = 128000
+	}
+	if c.TTS.Speed == 0 {
+		c.TTS.Speed = 1.0
+	}
+	if c.TTS.TimeoutSeconds == 0 {
+		c.TTS.TimeoutSeconds = 60
+	}
+
+	if c.Storage.Provider == "" {
+		c.Storage.Provider = "cos"
+	}
+	if c.Storage.Provider == "cos" {
+		if c.Storage.Bucket == "" {
+			return fmt.Errorf("config %s: storage.bucket is required (set AIBAO_STORAGE_COS_BUCKET)", path)
+		}
+		if c.Storage.Region == "" {
+			return fmt.Errorf("config %s: storage.region is required", path)
+		}
+		if c.Storage.SecretID == "" {
+			return fmt.Errorf("config %s: storage.secret_id is required (set AIBAO_STORAGE_COS_SECRET_ID)", path)
+		}
+		if c.Storage.SecretKey == "" {
+			return fmt.Errorf("config %s: storage.secret_key is required (set AIBAO_STORAGE_COS_SECRET_KEY)", path)
+		}
+	}
+	if c.Storage.PresignedTTLSec == 0 {
+		c.Storage.PresignedTTLSec = 900
+	}
+	if c.Storage.UploadTimeoutSec == 0 {
+		c.Storage.UploadTimeoutSec = 30
 	}
 	return nil
 }

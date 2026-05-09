@@ -8,6 +8,10 @@
 #   AIBAO_CRYPTO_PHONE_AES_KEY
 #   AIBAO_CRYPTO_SAFEHASH_SALT
 #   AIBAO_LLM_DOUBAO_API_KEY  (生产必须通过环境变量注入豆包 API Key，不要写入文件)
+#   AIBAO_TTS_MINIMAX_API_KEY  (Minimax TTS API Key — 严禁写入此文件)
+#   AIBAO_TTS_MINIMAX_GROUP_ID (Minimax Group ID)
+#   AIBAO_STORAGE_COS_SECRET_ID / AIBAO_STORAGE_COS_SECRET_KEY (腾讯云 COS 密钥 — 严禁写入此文件)
+#   AIBAO_STORAGE_COS_BUCKET / AIBAO_STORAGE_COS_APPID
 # Production: generate jwt_secret and phone_aes_key with `openssl rand -hex 32`
 # All secret values (jwt_secret / phone_aes_key / safehash_salt / postgres.password)
 # MUST come from env vars in production, never written to this file.
@@ -64,3 +68,22 @@ worker:
   max_attempts: 5
   backoff_base_seconds: 2
   backoff_max_seconds: 600
+
+tts:
+  provider: minimax
+  base_url: https://api.minimax.chat
+  model: speech-01-turbo
+  voice_id: female-tianmei  # TBD: confirm via Minimax console; default to a Chinese children-friendly voice
+  format: mp3
+  sample_rate: 32000
+  bitrate: 128000
+  speed: 1.0
+  timeout_seconds: 60
+  # group_id / api_key: 生产必须通过 AIBAO_TTS_MINIMAX_GROUP_ID / AIBAO_TTS_MINIMAX_API_KEY 注入，绝不能写入此文件
+
+storage:
+  provider: cos
+  region: ap-shanghai
+  presigned_ttl_seconds: 900
+  upload_timeout_seconds: 30
+  # bucket / app_id / secret_id / secret_key: 生产必须通过 AIBAO_STORAGE_COS_* 环境变量注入，绝不能写入此文件

@@ -44,6 +44,16 @@ llm:
   base_url: https://example.com
 worker:
   enabled: true
+tts:
+  provider: mock
+  group_id: dev-gid
+  api_key: dev-tts-key
+storage:
+  provider: mock
+  bucket: dev-bucket
+  region: ap-shanghai
+  secret_id: dev-sid
+  secret_key: dev-skey
 `), 0o600))
 	return path
 }
@@ -109,6 +119,14 @@ crypto:
   safehash_salt: salt
 llm:
   api_key: dev-key
+tts:
+  group_id: g
+  api_key: k
+storage:
+  bucket: b
+  region: ap-shanghai
+  secret_id: s
+  secret_key: k
 `), 0o600))
 
 	cfg, err := Load(path)
@@ -137,6 +155,14 @@ crypto:
   safehash_salt: salt
 llm:
   api_key: dev-key
+tts:
+  group_id: g
+  api_key: k
+storage:
+  bucket: b
+  region: ap-shanghai
+  secret_id: s
+  secret_key: k
 `), 0o600))
 
 	cfg, err := Load(path)
@@ -166,6 +192,14 @@ crypto:
   safehash_salt: salt
 llm:
   api_key: dev-key
+tts:
+  group_id: g
+  api_key: k
+storage:
+  bucket: b
+  region: ap-shanghai
+  secret_id: s
+  secret_key: k
 `), 0o600))
 
 	_, err := Load(path)
@@ -194,6 +228,14 @@ crypto:
   safehash_salt: salt
 llm:
   api_key: dev-key
+tts:
+  group_id: g
+  api_key: k
+storage:
+  bucket: b
+  region: ap-shanghai
+  secret_id: s
+  secret_key: k
 `), 0o600))
 
 	cfg, err := Load(path)
@@ -206,6 +248,81 @@ llm:
 	assert.Equal(t, 5, cfg.LLM.GenerateRPM)
 	assert.Equal(t, 5, cfg.Worker.PollIntervalSec)
 	assert.Equal(t, 10, cfg.Worker.BatchSize)
+}
+
+func TestLoad_TTSStorageDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+  log_dir: /tmp/aibao
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+redis:
+  addr: 127.0.0.1:6379
+auth:
+  jwt_secret: x
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: salt
+llm:
+  api_key: dev-key
+tts:
+  group_id: g
+  api_key: k
+storage:
+  bucket: b
+  region: ap-shanghai
+  secret_id: s
+  secret_key: k
+`), 0o600))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "minimax", cfg.TTS.Provider)
+	assert.Equal(t, "speech-01-turbo", cfg.TTS.Model)
+	assert.Equal(t, "female-tianmei", cfg.TTS.VoiceID)
+	assert.Equal(t, "mp3", cfg.TTS.Format)
+	assert.Equal(t, 32000, cfg.TTS.SampleRate)
+	assert.InDelta(t, 1.0, cfg.TTS.Speed, 0.001)
+	assert.Equal(t, "cos", cfg.Storage.Provider)
+	assert.Equal(t, 900, cfg.Storage.PresignedTTLSec)
+}
+
+func TestLoad_TTSMissingKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+  log_dir: /tmp/aibao
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+redis:
+  addr: 127.0.0.1:6379
+auth:
+  jwt_secret: x
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: salt
+llm:
+  api_key: dev-key
+storage:
+  bucket: b
+  region: ap-shanghai
+  secret_id: s
+  secret_key: k
+`), 0o600))
+	_, err := Load(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tts.group_id")
 }
 
 func TestLoad_MalformedYAML(t *testing.T) {
