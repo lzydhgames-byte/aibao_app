@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS outbox_events;
+DROP TABLE IF EXISTS memories;
+DROP TABLE IF EXISTS story_elements;
+DROP TABLE IF EXISTS stories;
