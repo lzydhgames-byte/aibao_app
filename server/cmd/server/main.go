@@ -19,8 +19,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/aibao/server/internal/api"
+	"github.com/aibao/server/internal/api/middleware"
+	"github.com/aibao/server/internal/gateway/llm"
 	"github.com/aibao/server/internal/gateway/sms"
 	"github.com/aibao/server/internal/metrics"
+	"github.com/aibao/server/internal/model"
 	"github.com/aibao/server/internal/pkg/config"
 	"github.com/aibao/server/internal/pkg/jwtauth"
 	"github.com/aibao/server/internal/pkg/logger"
@@ -29,6 +32,10 @@ import (
 	"github.com/aibao/server/internal/repository"
 	authsvc "github.com/aibao/server/internal/service/auth"
 	childsvc "github.com/aibao/server/internal/service/child"
+	"github.com/aibao/server/internal/service/safety"
+	storysvc "github.com/aibao/server/internal/service/story"
+	"github.com/aibao/server/internal/worker"
+	"github.com/aibao/server/internal/worker/handlers"
 )
 
 func main() {
@@ -39,6 +46,15 @@ func main() {
 }
 
 func run() error {
+	// Doubao API key passthrough: the Makefile / ops scripts use the more
+	// specific name AIBAO_LLM_DOUBAO_API_KEY. Map it onto AIBAO_LLM_API_KEY
+	// (which config viper binds to llm.api_key) when the latter is unset.
+	if os.Getenv("AIBAO_LLM_API_KEY") == "" {
+		if k := os.Getenv("AIBAO_LLM_DOUBAO_API_KEY"); k != "" {
+			_ = os.Setenv("AIBAO_LLM_API_KEY", k)
+		}
+	}
+
 	configPath := os.Getenv("AIBAO_CONFIG")
 	if configPath == "" {
 		configPath = "config/config.dev.yaml"
@@ -120,17 +136,96 @@ func run() error {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
 	m := metrics.New(reg)
+	bm := metrics.NewBusiness(reg)
+	_ = bm // reserved for future orchestrator instrumentation
+
+	// LLM client (Plan 4): switch by provider; doubao requires API key.
+	var llmClient llm.Client
+	switch cfg.LLM.Provider {
+	case "mock":
+		llmClient = llm.NewMock()
+	case "doubao", "":
+		dc, err := llm.NewDoubao(llm.DoubaoConfig{
+			APIKey:         cfg.LLM.APIKey,
+			BaseURL:        cfg.LLM.BaseURL,
+			TimeoutSeconds: cfg.LLM.TimeoutSeconds,
+		})
+		if err != nil {
+			return fmt.Errorf("init doubao: %w", err)
+		}
+		llmClient = dc
+	default:
+		return fmt.Errorf("unknown llm provider: %s", cfg.LLM.Provider)
+	}
+
+	budget := llm.NewBudgetGate(rdb, llm.BudgetConfig{
+		DailyLimitYuan:     cfg.LLM.DailyBudgetYuan,
+		PriceInputPerMTok:  cfg.LLM.PriceInputPerMTok,
+		PriceOutputPerMTok: cfg.LLM.PriceOutputPerMTok,
+	})
+
+	storyRepo := repository.NewStoryRepo(db)
+	memoryRepo := repository.NewMemoryRepo(db)
+	outboxRepo := repository.NewOutboxRepo(db)
+
+	rs, err := safety.LoadRules("safety/rules.yaml", "safety/ip_whitelist.yaml", "safety/ip_blacklist.yaml")
+	if err != nil {
+		return fmt.Errorf("load safety rules: %w", err)
+	}
+	intentProvider := safety.NewLLMIntentProvider(llmClient, cfg.LLM.IntentModel)
+	preChecker := safety.NewPreChecker(rs, intentProvider)
+	postChecker := safety.NewPostChecker(rs)
+
+	orch, err := storysvc.NewOrchestrator(storysvc.Deps{
+		Stories:       storyRepo,
+		Children:      childRepo,
+		LLM:           llmClient,
+		Budget:        budget,
+		PreCheck:      preChecker,
+		PostCheck:     postChecker,
+		PromptTmpl:    "safety/system_prompt.tmpl",
+		FallbackDir:   "safety/fallback_stories",
+		StoryModel:    cfg.LLM.StoryModel,
+		Temperature:   cfg.LLM.StoryTemperature,
+		PromptVersion: "v1",
+	})
+	if err != nil {
+		return fmt.Errorf("init orchestrator: %w", err)
+	}
+	storyHandler := api.NewStoryHandler(orch, storyRepo)
+
+	counter := middleware.NewRedisCounter(rdb)
+	genRateLimit := middleware.GenerateRateLimit(counter, cfg.LLM.GenerateRPM, time.Minute)
+	budgetGuard := middleware.BudgetGuard(budget)
 
 	router := api.NewRouter(api.RouterDeps{
-		Metrics: m,
-		Reg:     reg,
-		PG:      pgChecker{db: db},
-		Redis:   redisChecker{c: rdb},
-		JWT:     jwtMgr,
-		Auth:    authHandler,
-		Me:      meHandler,
-		Child:   childHandler,
+		Metrics:      m,
+		Reg:          reg,
+		PG:           pgChecker{db: db},
+		Redis:        redisChecker{c: rdb},
+		JWT:          jwtMgr,
+		Auth:         authHandler,
+		Me:           meHandler,
+		Child:        childHandler,
+		Story:        storyHandler,
+		GenRateLimit: genRateLimit,
+		BudgetGuard:  budgetGuard,
 	})
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	if cfg.Worker.Enabled {
+		w := worker.New(outboxRepo, worker.Config{
+			PollInterval: time.Duration(cfg.Worker.PollIntervalSec) * time.Second,
+			BatchSize:    cfg.Worker.BatchSize,
+			MaxAttempts:  cfg.Worker.MaxAttempts,
+			BackoffBase:  time.Duration(cfg.Worker.BackoffBaseSeconds) * time.Second,
+			BackoffMax:   time.Duration(cfg.Worker.BackoffMaxSeconds) * time.Second,
+		})
+		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo))
+		go w.Run(workerCtx)
+		lg.Info("worker.enabled", "poll_sec", cfg.Worker.PollIntervalSec)
+	}
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
