@@ -12,6 +12,8 @@ type Story struct {
 	AudioFormat          string    `gorm:"column:audio_format" json:"-"`
 	AudioSizeBytes       int64     `gorm:"column:audio_size_bytes" json:"-"`
 	AudioDurationSeconds int       `gorm:"column:audio_duration_seconds" json:"-"`
+	AudioStatus          string     `gorm:"column:audio_status" json:"audio_status"`
+	AudioFailedAt        *time.Time `gorm:"column:audio_failed_at" json:"-"`
 	DurationMinutes      int       `gorm:"column:duration_minutes" json:"duration_minutes"`
 	Style                string    `gorm:"column:style" json:"style"`
 	Topic                string    `gorm:"column:topic" json:"topic"`
@@ -82,4 +84,12 @@ const (
 // Outbox event types.
 const (
 	EventTypeMemoryUpdate = "memory_update"
+	EventTypeTTSSynthesis = "tts_synthesis"
+)
+
+// Audio status constants for Story.AudioStatus.
+const (
+	AudioStatusPending = "pending"
+	AudioStatusReady   = "ready"
+	AudioStatusFailed  = "failed"
 )
