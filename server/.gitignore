@@ -9,6 +9,11 @@
 /logs/
 *.log
 
+# Smoke-test scratch files
+smoke-*.err
+smoke-*.json
+token.txt
+
 # IDE
 .idea/
 .vscode/
