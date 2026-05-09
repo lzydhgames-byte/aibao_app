@@ -108,12 +108,35 @@ func TestOrchestrator_HappyPath(t *testing.T) {
 	assert.NotZero(t, out.ID)
 	assert.Equal(t, "doubao-1.5-pro-32k", out.LLMModel)
 	require.NotNil(t, repo.created)
-	require.Len(t, repo.events, 1)
-	assert.Equal(t, model.EventTypeMemoryUpdate, repo.events[0].EventType)
+	require.Len(t, repo.events, 2)
+	types := []string{repo.events[0].EventType, repo.events[1].EventType}
+	assert.Contains(t, types, model.EventTypeMemoryUpdate)
+	assert.Contains(t, types, model.EventTypeTTSSynthesis)
 
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(repo.events[0].Payload, &payload))
-	assert.Equal(t, float64(out.ID), payload["story_id"])
+	// memory_update payload should have story_id patched to story.ID
+	var memEv *model.OutboxEvent
+	var ttsEv *model.OutboxEvent
+	for _, e := range repo.events {
+		if e.EventType == model.EventTypeMemoryUpdate {
+			memEv = e
+		}
+		if e.EventType == model.EventTypeTTSSynthesis {
+			ttsEv = e
+		}
+	}
+	require.NotNil(t, memEv)
+	require.NotNil(t, ttsEv)
+
+	var memPayload map[string]any
+	require.NoError(t, json.Unmarshal(memEv.Payload, &memPayload))
+	assert.Equal(t, float64(out.ID), memPayload["story_id"])
+
+	var ttsPayload map[string]any
+	require.NoError(t, json.Unmarshal(ttsEv.Payload, &ttsPayload))
+	assert.Equal(t, float64(out.ID), ttsPayload["story_id"])
+
+	// audio_status is set to pending on the response Story
+	assert.Equal(t, model.AudioStatusPending, out.AudioStatus)
 }
 
 func TestOrchestrator_PreCheck_RejectsRedline(t *testing.T) {

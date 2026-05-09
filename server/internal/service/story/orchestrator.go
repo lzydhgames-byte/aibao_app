@@ -189,20 +189,32 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		story.LLMModel = o.d.StoryModel
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	memPayload, _ := json.Marshal(map[string]any{
 		"story_id":      0,
 		"child_id":      child.ID,
 		"title":         story.Title,
 		"summary":       summarize(llmText, 200),
 		"used_fallback": usedFallback,
 	})
-	event := &model.OutboxEvent{
+	memEvent := &model.OutboxEvent{
 		EventType: model.EventTypeMemoryUpdate,
-		Payload:   payload,
+		Payload:   memPayload,
 		Status:    model.OutboxStatusPending,
 	}
 
-	if err := o.d.Stories.CreateWithOutbox(ctx, story, elements, []*model.OutboxEvent{event}); err != nil {
+	ttsPayload, _ := json.Marshal(map[string]any{
+		"story_id": 0,
+		"child_id": child.ID,
+	})
+	ttsEvent := &model.OutboxEvent{
+		EventType: model.EventTypeTTSSynthesis,
+		Payload:   ttsPayload,
+		Status:    model.OutboxStatusPending,
+	}
+
+	story.AudioStatus = model.AudioStatusPending
+
+	if err := o.d.Stories.CreateWithOutbox(ctx, story, elements, []*model.OutboxEvent{memEvent, ttsEvent}); err != nil {
 		return nil, apperr.Wrap(err, apperr.CodeInternal, "story_persist_failed", "服务暂时不可用，请稍后再试")
 	}
 
@@ -213,7 +225,13 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		"summary":       summarize(llmText, 200),
 		"used_fallback": usedFallback,
 	})
-	event.Payload = patched
+	memEvent.Payload = patched
+
+	patchedTTS, _ := json.Marshal(map[string]any{
+		"story_id": story.ID,
+		"child_id": child.ID,
+	})
+	ttsEvent.Payload = patchedTTS
 
 	lg.Info("story.generate.done",
 		"story_id", story.ID,
