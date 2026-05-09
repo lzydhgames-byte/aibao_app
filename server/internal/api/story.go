@@ -89,6 +89,7 @@ func storyJSON(s *model.Story) gin.H {
 		"title":            s.Title,
 		"text":             s.TextContent,
 		"audio_object_key": s.AudioObjectKey,
+		"audio_status":     s.AudioStatus,
 		"duration_minutes": s.DurationMinutes,
 		"style":            s.Style,
 		"topic":            s.Topic,
