@@ -28,6 +28,9 @@ type RouterDeps struct {
 	Story        *StoryHandler
 	GenRateLimit gin.HandlerFunc
 	BudgetGuard  gin.HandlerFunc
+
+	// Audio (Plan 5)
+	Audio *AudioHandler
 }
 
 // NewRouter builds the gin.Engine with the standard middleware chain,
@@ -65,6 +68,9 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		}
 		if deps.Child != nil {
 			deps.Child.RegisterRoutes(auth)
+		}
+		if deps.Audio != nil {
+			deps.Audio.RegisterRoutes(auth)
 		}
 		if deps.Story != nil {
 			gen := auth.Group("")
