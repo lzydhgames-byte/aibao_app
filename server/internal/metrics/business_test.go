@@ -23,6 +23,12 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 	bm.OutboxDeadTotal.WithLabelValues("memory_update").Inc()
 	bm.LLMBudgetUsedYuan.Set(12.5)
 	bm.ExternalAPIErrorTotal.WithLabelValues("doubao").Inc()
+	bm.TTSCallDuration.WithLabelValues("minimax").Observe(2.0)
+	bm.TTSCallTotal.WithLabelValues("minimax", "ok").Inc()
+	bm.StorageUploadDuration.WithLabelValues("cos").Observe(0.4)
+	bm.AudioPendingCount.Set(2)
+	bm.AudioReadyTotal.Inc()
+	bm.AudioFailedTotal.WithLabelValues("tts").Inc()
 
 	mf, err := reg.Gather()
 	require.NoError(t, err)
@@ -41,6 +47,12 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 		"outbox_dead_total",
 		"llm_budget_used_yuan",
 		"external_api_error_total",
+		"tts_call_duration_seconds",
+		"tts_call_total",
+		"storage_upload_duration_seconds",
+		"audio_pending_count",
+		"audio_ready_total",
+		"audio_failed_total",
 	} {
 		assert.Contains(t, joined, want, "missing metric %s", want)
 	}
