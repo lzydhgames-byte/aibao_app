@@ -21,11 +21,13 @@ type fakeStoryRepo struct {
 	events  []*model.OutboxEvent
 }
 
-func (f *fakeStoryRepo) CreateWithOutbox(_ context.Context, s *model.Story, els []*model.StoryElement, ev *model.OutboxEvent) error {
+func (f *fakeStoryRepo) CreateWithOutbox(_ context.Context, s *model.Story, els []*model.StoryElement, evs []*model.OutboxEvent) error {
 	s.ID = 100
 	f.created = s
-	ev.ID = 200
-	f.events = append(f.events, ev)
+	for i, ev := range evs {
+		ev.ID = int64(200 + i)
+		f.events = append(f.events, ev)
+	}
 	for _, e := range els {
 		e.StoryID = s.ID
 	}

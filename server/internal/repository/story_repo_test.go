@@ -61,7 +61,7 @@ func TestStoryRepo_CreateWithOutbox_AtomicSuccess(t *testing.T) {
 		Status:    model.OutboxStatusPending,
 	}
 
-	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, elements, event))
+	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, elements, []*model.OutboxEvent{event}))
 	assert.NotZero(t, story.ID)
 	assert.NotZero(t, event.ID)
 	for _, e := range elements {
@@ -75,9 +75,9 @@ func TestStoryRepo_FindByID(t *testing.T) {
 	defer cleanup()
 
 	story := &model.Story{ChildID: child.ID, TextContent: "x", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1"}
-	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, nil, &model.OutboxEvent{
+	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, nil, []*model.OutboxEvent{{
 		EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
-	}))
+	}}))
 
 	got, err := srepo.FindByID(context.Background(), story.ID)
 	require.NoError(t, err)
@@ -90,4 +90,47 @@ func TestStoryRepo_FindByID_NotFound(t *testing.T) {
 	defer cleanup()
 	_, err := srepo.FindByID(context.Background(), 9999)
 	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestStoryRepo_MarkAudioReady(t *testing.T) {
+	_, _, srepo, child, cleanup := setupStoryRepo(t)
+	defer cleanup()
+
+	story := &model.Story{
+		ChildID: child.ID, TextContent: "x", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1",
+		AudioStatus: model.AudioStatusPending,
+	}
+	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, nil, []*model.OutboxEvent{{
+		EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
+	}}))
+
+	require.NoError(t, srepo.MarkAudioReady(context.Background(), story.ID,
+		"audio/1/42-x.mp3", "mp3", 12345, 600))
+
+	got, err := srepo.FindByID(context.Background(), story.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.AudioStatusReady, got.AudioStatus)
+	assert.Equal(t, "audio/1/42-x.mp3", got.AudioObjectKey)
+	assert.Equal(t, int64(12345), got.AudioSizeBytes)
+	assert.Equal(t, 600, got.AudioDurationSeconds)
+}
+
+func TestStoryRepo_MarkAudioFailed(t *testing.T) {
+	_, _, srepo, child, cleanup := setupStoryRepo(t)
+	defer cleanup()
+
+	story := &model.Story{
+		ChildID: child.ID, TextContent: "x", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1",
+		AudioStatus: model.AudioStatusPending,
+	}
+	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, nil, []*model.OutboxEvent{{
+		EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
+	}}))
+
+	require.NoError(t, srepo.MarkAudioFailed(context.Background(), story.ID, "minimax 502"))
+
+	got, err := srepo.FindByID(context.Background(), story.ID)
+	require.NoError(t, err)
+	assert.Equal(t, model.AudioStatusFailed, got.AudioStatus)
+	require.NotNil(t, got.AudioFailedAt)
 }

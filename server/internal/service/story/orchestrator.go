@@ -16,7 +16,7 @@ import (
 
 // StoryRepo is the minimal repo surface Orchestrator needs.
 type StoryRepo interface {
-	CreateWithOutbox(ctx context.Context, story *model.Story, elements []*model.StoryElement, event *model.OutboxEvent) error
+	CreateWithOutbox(ctx context.Context, story *model.Story, elements []*model.StoryElement, events []*model.OutboxEvent) error
 	FindByID(ctx context.Context, id int64) (*model.Story, error)
 }
 
@@ -202,7 +202,7 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		Status:    model.OutboxStatusPending,
 	}
 
-	if err := o.d.Stories.CreateWithOutbox(ctx, story, elements, event); err != nil {
+	if err := o.d.Stories.CreateWithOutbox(ctx, story, elements, []*model.OutboxEvent{event}); err != nil {
 		return nil, apperr.Wrap(err, apperr.CodeInternal, "story_persist_failed", "服务暂时不可用，请稍后再试")
 	}
 

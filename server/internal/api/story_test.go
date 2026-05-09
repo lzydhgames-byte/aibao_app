@@ -25,11 +25,13 @@ type fakeStoryRepo struct {
 	last *model.Story
 }
 
-func (f *fakeStoryRepo) CreateWithOutbox(_ context.Context, s *model.Story, _ []*model.StoryElement, ev *model.OutboxEvent) error {
+func (f *fakeStoryRepo) CreateWithOutbox(_ context.Context, s *model.Story, _ []*model.StoryElement, evs []*model.OutboxEvent) error {
 	s.ID = 555
 	s.CreatedAt = time.Now()
 	f.last = s
-	ev.ID = 999
+	for i, ev := range evs {
+		ev.ID = int64(999 + i)
+	}
 	return nil
 }
 func (f *fakeStoryRepo) FindByID(_ context.Context, id int64) (*model.Story, error) {
