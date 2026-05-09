@@ -81,3 +81,14 @@ defer pg.Terminate(ctx)
 类比：stub=假人模特，fake=玩具厨房，mock=监视器。  
 service 单测时 mock repository 和 gateway，不真起 DB / 不真调 LLM。  
 **为什么需要**：单元测试要快——不该真调豆包 / 真起数据库。用假实现替代真依赖，让测试能在毫秒级跑完且结果稳定。
+
+## 6.10 Git Bash on Windows 中文编码陷阱
+Git Bash 默认 locale 是 **GBK / CP936**。当用 `curl -d '{"prompt":"中文"}'` 发请求时，bash 会把命令行参数中的 UTF-8 字符串按 GBK 重编码为字节，发到服务端被当 UTF-8 解码 → 乱码。
+
+**项目体现**：Plan 4 smoke 测试时红线词"血腥"未被拦截，根因就是这个——服务端 PreCheck 收到的根本不是"血腥"两字的 UTF-8 字节，而是 GBK 重编码后的乱码字节，匹配不到红线词库里的"血"。
+
+**怎么绕**：用 PowerShell 的 `[System.Text.Encoding]::UTF8.GetBytes($body)` 显式拿到 UTF-8 字节，再走 `Invoke-WebRequest -Body $bytes`。
+
+**为什么需要这条**：定位这个 bug 浪费了一小时——因为 server 端代码看着像有 bug（"红线词库不全？"），实际是 client 编码错。生产环境完全不会出现：Flutter / iOS HTTP 库永远 UTF-8 序列化 JSON，与 client locale 无关。但本地 smoke 测试是真会踩。
+
+**类比**：寄国际快递时收件人地址写成中文又不贴翻译标签——快递员（服务端）不认得，包裹送不到。问题不在快递公司，在你寄之前没用对编码。

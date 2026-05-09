@@ -129,6 +129,16 @@
 - 覆盖率 90.9% / 81.2%；Matcher 11µs/op（远低于 1ms 验收）
 - 0 lint issues
 
+### Plan 4（2026-05-09 完成，22 Task）故事生成 + LLM Gateway + Outbox Worker
+- LLM Gateway 抽象（Doubao OpenAI 兼容 + Mock + BudgetGate 预算熔断）
+- Story Orchestrator（PreCheck → Prompt → LLM → PostCheck → Fallback → Persist 同事务）
+- Outbox Pattern（4 表 + Worker + `FOR UPDATE SKIP LOCKED` + 指数退避 + DLQ）
+- 故事生成 API（POST /stories/generate, GET /stories/:id）
+- 限流 + 预算 middleware（per-user 5/min；超日预算 503）
+- 5 个 fallback 故事模板 + 启发式 element extractor
+- 业务 metrics 定义（9 个；埋点 Plan 5/6 完善）
+- 端到端真豆包冒烟通过：21s / 568 字 / 0 红线 / Outbox 8/8 done / Memories 6 行
+
 ## 待决策项
 
 - 域名（发布前再注册，debug 阶段用 IP）
@@ -149,6 +159,7 @@
 - **2026-05-07** — 知识库补全 Plan 2 涉及的 12 个新概念（10 主题 100+ 词条）
 - **2026-05-07** — 完成 Plan 3 实现规划（双层安全 + Prompt 模板，待执行）
 - **2026-05-08** — Plan 3 全部 12 Task 完成，CLI demo 通过；覆盖率 90.9%/81.2%
+- **2026-05-09** — Plan 4 完成：LLM Gateway + Story Orchestrator + Outbox Worker 全栈实现，端到端真豆包生成验证通过
 
 ## 关键技术教训（来自实施过程）
 
@@ -158,3 +169,7 @@
 - **Windows 下无法验证 graceful shutdown**：`taskkill -F` 是 SIGKILL，验不了 SIGTERM 流程；生产环境（Linux+systemd）才能真验
 - **viper Unmarshal 不读 env-only 字段**：必须显式 `BindEnv` 列表
 - **golangci-lint v2 schema 与 v1 不兼容**：formatters 单独分组，`gosimple` 合到 `staticcheck`
+- **火山引擎 Endpoint ID 系统**：豆包 OpenAI 兼容入口不接受模型名称（如 `doubao-1.5-pro-32k`），必须在控制台创建"推理接入点" → 拿到 `ep-m-...` ID → 该 ID 作为 `model` 字段调用。每次接入新模型都要走这个流程。已记录到知识库 11.8。
+- **Git Bash on Windows 中文编码污染**：Git Bash 默认 GBK locale 把命令行参数中的 UTF-8 字符串重编码为 GBK 字节再 POST。Smoke 测试中文 prompt 必须用 PowerShell + `[System.Text.Encoding]::UTF8.GetBytes()` 显式发 UTF-8。生产 Flutter 客户端不受影响（HTTP 库永远 UTF-8 序列化）。已记录到知识库 6.10。
+- **fail-open vs fail-closed 取舍**：意图分类 LLM 失败时 fail-open 到 safe（不拦用户），红线词匹配 fail-closed 必须拦。原则：影响用户体验的非关键检查 fail-open，安全硬要求 fail-closed。已记录到知识库 11.9 / 10-security-and-compliance.md。
+- **viper Bind Env 自动映射规则**：配置字段路径 `a.b.c` 自动绑定到 env `AIBAO_A_B_C`。Plan 4 中 `llm.api_key` 自动绑到 `AIBAO_LLM_API_KEY`，但用户习惯用 `AIBAO_LLM_DOUBAO_API_KEY` → 在 main.go 加 fallback shim 把后者拷贝到前者。

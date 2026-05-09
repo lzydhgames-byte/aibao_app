@@ -10,8 +10,8 @@
 
 ## 2. 当前阶段
 
-**Plan 1 + 2 + 3 全部实现并通过冒烟。**
-当前下一步：写 Plan 4（故事生成 + LLM Gateway + Outbox），需先确认豆包 Pro API Key 是否就位。
+**Plan 1 + 2 + 3 + 4 全部实现并通过冒烟。**
+当前下一步：写 Plan 5（音频编排 + COS 签名 URL），把文本故事变成有声音的故事。
 
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)
@@ -19,6 +19,7 @@
 - 已完成的 Plan 1：[docs/superpowers/plans/2026-04-28-plan-01-backend-infrastructure.md](docs/superpowers/plans/2026-04-28-plan-01-backend-infrastructure.md)
 - 已完成的 Plan 2：[docs/superpowers/plans/2026-05-07-plan-02-auth-and-child-profile.md](docs/superpowers/plans/2026-05-07-plan-02-auth-and-child-profile.md)
 - 已完成的 Plan 3：[docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md](docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md)
+- 已完成的 Plan 4：[docs/superpowers/plans/2026-05-08-plan-04-story-generation.md](docs/superpowers/plans/2026-05-08-plan-04-story-generation.md)
 
 ### 已落地的能力（不要重做）
 - 后端骨架（Go + Gin + GORM + slog + Prometheus + 健康检查 + 优雅关停）
@@ -29,7 +30,14 @@
 - **双层安全护栏**：PreCheck 6 类拦截 + PostCheck 3 类拦截 + 220 红线词 6 大类 + 12 IP 白名单 + 30 IP 黑名单
 - **System Prompt 模板**：text/template + 8 条强约束 + 11 个动态字段
 - **cmd/safetycheck CLI**：3 个子命令演示安全 + Prompt 装配
-- 知识库 10 主题 100+ 词条（用户复盘用）
+- **LLM Gateway 抽象**（Doubao + Mock + BudgetGate 预算熔断）
+- **Story Orchestrator**（PreCheck → Prompt → LLM → PostCheck → Fallback → Persist 同事务）
+- **Outbox Pattern**（4 表：stories / story_elements / memories / outbox_events + Worker + SKIP LOCKED + 指数退避 + DLQ）
+- **故事生成 API**（POST /stories/generate, GET /stories/:id）
+- **限流 + 预算 middleware**（per-user 5/min；超日预算 503）
+- **5 个 fallback 故事模板** + 启发式 element extractor
+- **业务 metrics 定义**（9 个；埋点留 Plan 5/6 完善）
+- 知识库 11 主题 120+ 词条（用户复盘用）
 
 ### 端到端可演示接口（已通过冒烟）
 - `GET /health` `GET /ready` `GET /metrics`
@@ -37,6 +45,8 @@
 - `POST /api/v1/auth/login_or_register`
 - `GET /api/v1/me`（需 Bearer JWT）
 - `POST/GET/PATCH /api/v1/children`（需 Bearer JWT）
+- `POST /api/v1/stories/generate`（需 Bearer JWT）
+- `GET /api/v1/stories/:id`（需 Bearer JWT）
 
 ### CLI 可演示
 - `safetycheck precheck "..."` —— 前置预审
