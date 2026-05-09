@@ -22,6 +22,8 @@ import (
 	"github.com/aibao/server/internal/api/middleware"
 	"github.com/aibao/server/internal/gateway/llm"
 	"github.com/aibao/server/internal/gateway/sms"
+	"github.com/aibao/server/internal/gateway/storage"
+	"github.com/aibao/server/internal/gateway/tts"
 	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/model"
 	"github.com/aibao/server/internal/pkg/config"
@@ -59,9 +61,52 @@ func run() error {
 	if configPath == "" {
 		configPath = "config/config.dev.yaml"
 	}
+	// Plan 5 env fallbacks: viper-bound names use AIBAO_TTS_* / AIBAO_STORAGE_*
+	// but ops scripts use the more specific names below. Map them in before
+	// config.Load reads env so validation passes.
+	envFallbacks := map[string]string{
+		"AIBAO_TTS_GROUP_ID":        "AIBAO_TTS_MINIMAX_GROUP_ID",
+		"AIBAO_TTS_API_KEY":         "AIBAO_TTS_MINIMAX_API_KEY",
+		"AIBAO_STORAGE_SECRET_ID":   "AIBAO_STORAGE_COS_SECRET_ID",
+		"AIBAO_STORAGE_SECRET_KEY":  "AIBAO_STORAGE_COS_SECRET_KEY",
+		"AIBAO_STORAGE_BUCKET":      "AIBAO_STORAGE_COS_BUCKET",
+		"AIBAO_STORAGE_REGION":      "AIBAO_STORAGE_COS_REGION",
+		"AIBAO_STORAGE_APP_ID":      "AIBAO_STORAGE_COS_APPID",
+	}
+	for primary, fallback := range envFallbacks {
+		if os.Getenv(primary) == "" {
+			if v := os.Getenv(fallback); v != "" {
+				_ = os.Setenv(primary, v)
+			}
+		}
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Idempotent post-load shim: only fill cfg fields if still empty.
+	if cfg.TTS.GroupID == "" {
+		cfg.TTS.GroupID = os.Getenv("AIBAO_TTS_MINIMAX_GROUP_ID")
+	}
+	if cfg.TTS.APIKey == "" {
+		cfg.TTS.APIKey = os.Getenv("AIBAO_TTS_MINIMAX_API_KEY")
+	}
+	if cfg.Storage.SecretID == "" {
+		cfg.Storage.SecretID = os.Getenv("AIBAO_STORAGE_COS_SECRET_ID")
+	}
+	if cfg.Storage.SecretKey == "" {
+		cfg.Storage.SecretKey = os.Getenv("AIBAO_STORAGE_COS_SECRET_KEY")
+	}
+	if cfg.Storage.Bucket == "" {
+		cfg.Storage.Bucket = os.Getenv("AIBAO_STORAGE_COS_BUCKET")
+	}
+	if cfg.Storage.Region == "" {
+		cfg.Storage.Region = os.Getenv("AIBAO_STORAGE_COS_REGION")
+	}
+	if cfg.Storage.AppID == "" {
+		cfg.Storage.AppID = os.Getenv("AIBAO_STORAGE_COS_APPID")
 	}
 
 	lg, closeLog, err := logger.NewFromConfig(cfg.Server.LogDir, cfg.Server.LogLevel)
@@ -139,6 +184,46 @@ func run() error {
 	bm := metrics.NewBusiness(reg)
 	_ = bm // reserved for future orchestrator instrumentation
 
+	// TTS client (Plan 5)
+	var ttsClient tts.Client
+	switch cfg.TTS.Provider {
+	case "minimax", "":
+		ttsClient, err = tts.NewMinimax(tts.MinimaxConfig{
+			BaseURL:        cfg.TTS.BaseURL,
+			GroupID:        cfg.TTS.GroupID,
+			APIKey:         cfg.TTS.APIKey,
+			TimeoutSeconds: cfg.TTS.TimeoutSeconds,
+		})
+		if err != nil {
+			return fmt.Errorf("init minimax tts: %w", err)
+		}
+	case "mock":
+		ttsClient = tts.NewMock()
+	default:
+		return fmt.Errorf("unknown tts provider: %s", cfg.TTS.Provider)
+	}
+
+	// Storage client (Plan 5)
+	var storageClient storage.Client
+	switch cfg.Storage.Provider {
+	case "cos", "":
+		storageClient, err = storage.NewCOS(storage.COSConfig{
+			Bucket:        cfg.Storage.Bucket,
+			Region:        cfg.Storage.Region,
+			AppID:         cfg.Storage.AppID,
+			SecretID:      cfg.Storage.SecretID,
+			SecretKey:     cfg.Storage.SecretKey,
+			UploadTimeout: time.Duration(cfg.Storage.UploadTimeoutSec) * time.Second,
+		})
+		if err != nil {
+			return fmt.Errorf("init cos: %w", err)
+		}
+	case "mock":
+		storageClient = storage.NewMock()
+	default:
+		return fmt.Errorf("unknown storage provider: %s", cfg.Storage.Provider)
+	}
+
 	// LLM client (Plan 4): switch by provider; doubao requires API key.
 	var llmClient llm.Client
 	switch cfg.LLM.Provider {
@@ -194,6 +279,11 @@ func run() error {
 	}
 	storyHandler := api.NewStoryHandler(orch, storyRepo)
 
+	audioHandler := api.NewAudioHandler(
+		storyRepo, childRepo, storageClient,
+		time.Duration(cfg.Storage.PresignedTTLSec)*time.Second,
+	)
+
 	counter := middleware.NewRedisCounter(rdb)
 	genRateLimit := middleware.GenerateRateLimit(counter, cfg.LLM.GenerateRPM, time.Minute)
 	budgetGuard := middleware.BudgetGuard(budget)
@@ -210,6 +300,7 @@ func run() error {
 		Story:        storyHandler,
 		GenRateLimit: genRateLimit,
 		BudgetGuard:  budgetGuard,
+		Audio:        audioHandler,
 	})
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
@@ -223,6 +314,20 @@ func run() error {
 			BackoffMax:   time.Duration(cfg.Worker.BackoffMaxSeconds) * time.Second,
 		})
 		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo))
+		w.Register(model.EventTypeTTSSynthesis, handlers.NewTTSSynthesisHandler(
+			storyRepo, storyRepo,
+			ttsClient, storageClient,
+			handlers.TTSHandlerConfig{
+				Provider:   cfg.TTS.Provider,
+				Model:      cfg.TTS.Model,
+				VoiceID:    cfg.TTS.VoiceID,
+				Format:     cfg.TTS.Format,
+				SampleRate: cfg.TTS.SampleRate,
+				Bitrate:    cfg.TTS.Bitrate,
+				Speed:      cfg.TTS.Speed,
+			},
+			bm,
+		))
 		go w.Run(workerCtx)
 		lg.Info("worker.enabled", "poll_sec", cfg.Worker.PollIntervalSec)
 	}
