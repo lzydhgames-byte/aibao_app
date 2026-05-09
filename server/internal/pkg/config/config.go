@@ -19,6 +19,35 @@ type Config struct {
 	Auth     AuthConfig     `mapstructure:"auth"`
 	SMS      SMSConfig      `mapstructure:"sms"`
 	Crypto   CryptoConfig   `mapstructure:"crypto"`
+	LLM      LLMConfig      `mapstructure:"llm"`
+	Worker   WorkerConfig   `mapstructure:"worker"`
+}
+
+// LLMConfig holds LLM provider parameters.
+type LLMConfig struct {
+	Provider           string  `mapstructure:"provider"`              // "doubao" / "mock"
+	StoryModel         string  `mapstructure:"story_model"`           // "doubao-1.5-pro-32k"
+	IntentModel        string  `mapstructure:"intent_model"`          // "doubao-lite"
+	APIKey             string  `mapstructure:"api_key"`               // env AIBAO_LLM_DOUBAO_API_KEY
+	BaseURL            string  `mapstructure:"base_url"`              // doubao OpenAI-compatible endpoint
+	TimeoutSeconds     int     `mapstructure:"timeout_seconds"`       // 30
+	MaxRetries         int     `mapstructure:"max_retries"`           // 1
+	StoryTemperature   float64 `mapstructure:"story_temperature"`     // 0.8
+	IntentTemperature  float64 `mapstructure:"intent_temperature"`    // 0
+	DailyBudgetYuan    float64 `mapstructure:"daily_budget_yuan"`     // 100.0
+	PriceInputPerMTok  float64 `mapstructure:"price_input_per_mtok"`  // 0.8
+	PriceOutputPerMTok float64 `mapstructure:"price_output_per_mtok"` // 2.0
+	GenerateRPM        int     `mapstructure:"generate_rpm"`          // 5 / user / minute
+}
+
+// WorkerConfig holds outbox worker parameters.
+type WorkerConfig struct {
+	Enabled            bool `mapstructure:"enabled"`               // true
+	PollIntervalSec    int  `mapstructure:"poll_interval_seconds"` // 5
+	BatchSize          int  `mapstructure:"batch_size"`            // 10
+	MaxAttempts        int  `mapstructure:"max_attempts"`          // 5
+	BackoffBaseSeconds int  `mapstructure:"backoff_base_seconds"`  // 2
+	BackoffMaxSeconds  int  `mapstructure:"backoff_max_seconds"`   // 600
 }
 
 // AuthConfig holds JWT signing parameters.
@@ -97,6 +126,13 @@ func Load(path string) (*Config, error) {
 		"auth.jwt_secret", "auth.access_ttl_minutes", "auth.refresh_ttl_minutes",
 		"sms.provider", "sms.code_ttl_seconds", "sms.resend_cooldown_sec",
 		"crypto.phone_aes_key", "crypto.safehash_salt",
+		"llm.provider", "llm.story_model", "llm.intent_model", "llm.api_key",
+		"llm.base_url", "llm.timeout_seconds", "llm.max_retries",
+		"llm.story_temperature", "llm.intent_temperature",
+		"llm.daily_budget_yuan", "llm.price_input_per_mtok", "llm.price_output_per_mtok",
+		"llm.generate_rpm",
+		"worker.enabled", "worker.poll_interval_seconds", "worker.batch_size",
+		"worker.max_attempts", "worker.backoff_base_seconds", "worker.backoff_max_seconds",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -147,6 +183,57 @@ func applyDefaultsAndValidate(c *Config, path string) error {
 	}
 	if c.Crypto.SafehashSalt == "" {
 		return fmt.Errorf("config %s: crypto.safehash_salt is required (set AIBAO_CRYPTO_SAFEHASH_SALT)", path)
+	}
+	if c.LLM.Provider == "" {
+		c.LLM.Provider = "doubao"
+	}
+	if c.LLM.Provider == "doubao" && c.LLM.APIKey == "" {
+		return fmt.Errorf("config %s: llm.api_key is required (set AIBAO_LLM_API_KEY)", path)
+	}
+	if c.LLM.StoryModel == "" {
+		c.LLM.StoryModel = "doubao-1.5-pro-32k"
+	}
+	if c.LLM.IntentModel == "" {
+		c.LLM.IntentModel = "doubao-lite"
+	}
+	if c.LLM.BaseURL == "" {
+		c.LLM.BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
+	}
+	if c.LLM.TimeoutSeconds == 0 {
+		c.LLM.TimeoutSeconds = 30
+	}
+	if c.LLM.MaxRetries == 0 {
+		c.LLM.MaxRetries = 1
+	}
+	if c.LLM.StoryTemperature == 0 {
+		c.LLM.StoryTemperature = 0.8
+	}
+	if c.LLM.DailyBudgetYuan == 0 {
+		c.LLM.DailyBudgetYuan = 100.0
+	}
+	if c.LLM.PriceInputPerMTok == 0 {
+		c.LLM.PriceInputPerMTok = 0.8
+	}
+	if c.LLM.PriceOutputPerMTok == 0 {
+		c.LLM.PriceOutputPerMTok = 2.0
+	}
+	if c.LLM.GenerateRPM == 0 {
+		c.LLM.GenerateRPM = 5
+	}
+	if c.Worker.PollIntervalSec == 0 {
+		c.Worker.PollIntervalSec = 5
+	}
+	if c.Worker.BatchSize == 0 {
+		c.Worker.BatchSize = 10
+	}
+	if c.Worker.MaxAttempts == 0 {
+		c.Worker.MaxAttempts = 5
+	}
+	if c.Worker.BackoffBaseSeconds == 0 {
+		c.Worker.BackoffBaseSeconds = 2
+	}
+	if c.Worker.BackoffMaxSeconds == 0 {
+		c.Worker.BackoffMaxSeconds = 600
 	}
 	return nil
 }

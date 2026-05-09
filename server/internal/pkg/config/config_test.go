@@ -36,6 +36,14 @@ sms:
 crypto:
   phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   safehash_salt: dev-salt
+llm:
+  provider: mock
+  story_model: doubao-1.5-pro-32k
+  intent_model: doubao-lite
+  api_key: dev-key
+  base_url: https://example.com
+worker:
+  enabled: true
 `), 0o600))
 	return path
 }
@@ -99,6 +107,8 @@ auth:
 crypto:
   phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   safehash_salt: salt
+llm:
+  api_key: dev-key
 `), 0o600))
 
 	cfg, err := Load(path)
@@ -125,6 +135,8 @@ auth:
 crypto:
   phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   safehash_salt: salt
+llm:
+  api_key: dev-key
 `), 0o600))
 
 	cfg, err := Load(path)
@@ -152,11 +164,48 @@ redis:
 crypto:
   phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
   safehash_salt: salt
+llm:
+  api_key: dev-key
 `), 0o600))
 
 	_, err := Load(path)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "auth.jwt_secret")
+}
+
+func TestLoad_LLMDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(`
+server:
+  port: 8080
+  log_dir: /tmp/aibao
+postgres:
+  host: 127.0.0.1
+  port: 5432
+  database: aibao
+  user: aibao
+redis:
+  addr: 127.0.0.1:6379
+auth:
+  jwt_secret: x
+crypto:
+  phone_aes_key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  safehash_salt: salt
+llm:
+  api_key: dev-key
+`), 0o600))
+
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "doubao", cfg.LLM.Provider)
+	assert.Equal(t, "doubao-1.5-pro-32k", cfg.LLM.StoryModel)
+	assert.Equal(t, "doubao-lite", cfg.LLM.IntentModel)
+	assert.InDelta(t, 0.8, cfg.LLM.StoryTemperature, 0.001)
+	assert.InDelta(t, 100.0, cfg.LLM.DailyBudgetYuan, 0.001)
+	assert.Equal(t, 5, cfg.LLM.GenerateRPM)
+	assert.Equal(t, 5, cfg.Worker.PollIntervalSec)
+	assert.Equal(t, 10, cfg.Worker.BatchSize)
 }
 
 func TestLoad_MalformedYAML(t *testing.T) {

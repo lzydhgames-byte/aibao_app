@@ -7,6 +7,7 @@
 #   AIBAO_AUTH_JWT_SECRET
 #   AIBAO_CRYPTO_PHONE_AES_KEY
 #   AIBAO_CRYPTO_SAFEHASH_SALT
+#   AIBAO_LLM_DOUBAO_API_KEY  (生产必须通过环境变量注入豆包 API Key，不要写入文件)
 # Production: generate jwt_secret and phone_aes_key with `openssl rand -hex 32`
 # All secret values (jwt_secret / phone_aes_key / safehash_salt / postgres.password)
 # MUST come from env vars in production, never written to this file.
@@ -40,3 +41,26 @@ sms:
 crypto:
   # phone_aes_key: from env AIBAO_CRYPTO_PHONE_AES_KEY (64 hex chars = 32 bytes)
   # safehash_salt: from env AIBAO_CRYPTO_SAFEHASH_SALT
+
+llm:
+  provider: doubao
+  story_model: doubao-1.5-pro-32k
+  intent_model: doubao-lite
+  base_url: https://ark.cn-beijing.volces.com/api/v3
+  timeout_seconds: 30
+  max_retries: 1
+  story_temperature: 0.8
+  intent_temperature: 0
+  daily_budget_yuan: 100.0
+  price_input_per_mtok: 0.8
+  price_output_per_mtok: 2.0
+  generate_rpm: 5
+  # api_key: 生产必须通过 AIBAO_LLM_DOUBAO_API_KEY 环境变量注入，不要写在此文件
+
+worker:
+  enabled: true
+  poll_interval_seconds: 5
+  batch_size: 10
+  max_attempts: 5
+  backoff_base_seconds: 2
+  backoff_max_seconds: 600
