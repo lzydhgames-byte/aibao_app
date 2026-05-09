@@ -75,7 +75,43 @@ func New() string { ... }
 linter `revive` 强制要求每个导出符号都有。  
 **为什么必须以符号名开头**：godoc 工具会自动把这些注释生成 API 文档；"以符号名开头"是 godoc 的解析规则。IDE 鼠标悬停看到的也是这个注释——强制写让代码自带文档。
 
-## 3.10 `_ "import"` 副作用导入
+## 3.10 viper 自动 env 绑定规则
+viper 是 Go 主流的"配置加载库"，特性是**同时**从 yaml 文件 + 环境变量 + 命令行 flag 等多种源读配置——**优先级**：env > yaml（即同名时 env 覆盖 yaml）。
+
+### 自动绑定规则
+viper 的 `BindEnv` 把"配置 key 路径"自动映射到环境变量名，规则：
+```
+配置路径    a.b.c
+环境变量名  PREFIX_A_B_C   （prefix 由 SetEnvPrefix 决定 + 全大写 + . 转 _）
+```
+项目里 prefix 是 `AIBAO`，所以：
+| yaml key | 自动绑定的 env |
+|---|---|
+| `server.port` | `AIBAO_SERVER_PORT` |
+| `postgres.password` | `AIBAO_POSTGRES_PASSWORD` |
+| `llm.api_key` | `AIBAO_LLM_API_KEY` |
+
+### 项目踩坑实录
+Plan 4 的 Doubao API Key 我们**习惯叫** `AIBAO_LLM_DOUBAO_API_KEY`（多了一段 `_DOUBAO`），但 viper 按规则只会去找 `AIBAO_LLM_API_KEY`——结果 `cfg.LLM.APIKey` 永远是空。
+
+**解决方案**（main.go 里加 fallback shim）：
+```go
+if os.Getenv("AIBAO_LLM_API_KEY") == "" {
+    if v := os.Getenv("AIBAO_LLM_DOUBAO_API_KEY"); v != "" {
+        os.Setenv("AIBAO_LLM_API_KEY", v)
+    }
+}
+cfg, err := config.Load(...)  // 之后 viper 才看到 AIBAO_LLM_API_KEY
+```
+
+**为什么需要懂这个规则**：
+1. **省事**——加新配置字段时不用每个都手动写 `BindEnv`，按命名规则就自动生效
+2. **避坑**——env 名不按规则命名时静默失败（值就是空）很难定位；提前知道规则就能命名前先想清楚
+3. **写文档**——告诉用户"prod 部署要设哪些 env"时，按这个规则清单写出来即可
+
+**类比**：邮局自动派件规则——"门牌号 → 第几号信箱"是公开规则，按规则写信地址永远到家；自创"3 楼 D 单元"派件员看不懂就退回。
+
+## 3.11 `_ "import"` 副作用导入
 ```go
 import _ "github.com/lib/pq"   // 仅为了执行 init() 注册 driver
 ```

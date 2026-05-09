@@ -106,6 +106,50 @@ r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(reg, ...)))
 prometheus client 提供的是标准 `http.Handler`，Gin 用 `WrapH` 适配。  
 **为什么需要**：Go 生态里很多库（包括 promhttp）只实现 `http.Handler` 接口。`WrapH` 让这些标准 handler 也能挂在 Gin 路由上。
 
+## 7.10 限流算法对比（固定窗口 / 滑动窗口 / 令牌桶）
+"每分钟最多 5 次请求"听着简单，**怎么实现**有几种主流方案，各有取舍：
+
+### 固定窗口（Fixed Window）
+项目用的就是这种。Redis 实现：
+```go
+key := "rate:gen:user:42:202605091543"  // 当前分钟做 key
+count, _ := redis.Incr(key)
+redis.Expire(key, time.Minute)
+if count > 5 { return 429 }
+```
+**优点**：实现极简——一条 INCR + 一条 EXPIRE。  
+**缺点**：**窗口边界突刺**。比如限制"每分钟 5 次"——用户在 12:00:59 发 5 次 + 12:01:00 又发 5 次，**1 秒内来了 10 次**，但每个分钟窗口都没超 5 次，全放行。
+
+### 滑动窗口（Sliding Window Log）
+记录每次请求的时间戳，每次到来时**清掉 window 外的旧时间戳**再算数：
+```go
+zRemRangeByScore(key, 0, now - 60s)  // 删 60s 前的记录
+zAdd(key, now)                        // 加当前
+count := zCard(key)                   // 看现在 window 内有多少
+```
+**优点**：**没有边界突刺**——任何 60 秒内都不会超 5 次。  
+**缺点**：每次请求都要往 Redis ZSET 写 + 清理，开销比 Incr 大。
+
+### 令牌桶（Token Bucket）
+桶里固定容量 N 个令牌，**按速率 r 往桶里加**（如每秒 1 个），请求来时取一个令牌——没令牌就拒。
+**优点**：天然支持**短时突发**——桶满了允许一下子发 N 次，平均速率仍是 r。比"严格限流"更接近用户期望。  
+**缺点**：实现最复杂——需要持续往桶加令牌，分布式下要考虑多实例同步。  
+真实例：AWS API Gateway / Cloudflare 限流大多用令牌桶。
+
+### 项目策略：固定窗口（YAGNI 原则）
+| 维度 | 固定窗口 | 滑动窗口 | 令牌桶 |
+|---|---|---|---|
+| 实现复杂度 | 极低 | 中 | 高 |
+| 突刺问题 | 有 | 无 | 无 |
+| 突发友好 | 否 | 否 | 是 |
+| Redis 操作 | 1-2 次 | 3 次 | 2-3 次 |
+
+**为什么 MVP 用固定窗口**：用户体感不会注意"边界突刺"——故事生成 5 次/分钟，普通用户每分钟 1 次都嫌多，跨边界突刺要专门凑才能触发。**等真有问题再升级**——这是 [05.3 YAGNI](05-software-design.md#53-yagni-you-arent-gonna-need-it) 的体现。
+
+**项目体现**：`middleware.GenerateRateLimit` 通过 `Counter.IncrWithTTL` 实现固定窗口；key 是 `rate:gen:<uid>` + TTL=window。Plan 4 smoke 验证连续 7 次：5×200 + 2×429。
+
+**类比**：固定窗口=每天给你发一份饭票，吃完就没；滑动窗口=最近 24 小时内只能吃 3 顿（精确到秒）；令牌桶=每 8 小时长一颗豆子，攒着想吃几顿就吃几顿（最多攒 3 颗）。
+
 ## 7.9 请求超时与 `ReadHeaderTimeout`
 ```go
 srv := &http.Server{

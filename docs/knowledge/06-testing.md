@@ -71,18 +71,54 @@ defer pg.Terminate(ctx)
 每个测试自己的 PG 容器，端口随机分配——绝不会"昨天的数据污染今天"。  
 **为什么需要**：传统集成测试要么"假设机器上有 PG"——CI 跑挂、新人电脑跑挂；要么用 mock——测了个寂寞（mock 行为和真 PG 不一致）。testcontainers 让每个测试有独立真实 PG，环境干净且高保真。
 
-## 6.9 mock / fake / stub
-| 类型 | 行为 |
-|---|---|
-| **stub** | 返回固定值 |
-| **fake** | 简化但能用的实现（如内存版 Redis） |
-| **mock** | 验证调用方式（被调几次、参数对不对） |
+## 6.9 测试替身：mock / fake / stub
+单元测试需要"假装"外部依赖（数据库、LLM、Redis 等）——这些假实现统称**测试替身（Test Double）**，按"假到什么程度"分三种：
 
-类比：stub=假人模特，fake=玩具厨房，mock=监视器。  
-service 单测时 mock repository 和 gateway，不真起 DB / 不真调 LLM。  
-**为什么需要**：单元测试要快——不该真调豆包 / 真起数据库。用假实现替代真依赖，让测试能在毫秒级跑完且结果稳定。
+| 类型 | 行为 | 复杂度 | 例 |
+|---|---|---|---|
+| **stub** | 永远返回**固定值**，不验证怎么被调 | 最简单 | `stubBudget{allow: true}` 让 PreCheck 永远过 |
+| **fake** | 用**简化但能跑**的实现（内存版） | 中等 | `fakeStoryRepo` 用 map 记 ID→Story |
+| **mock** | 既假装实现，又**验证被调方式**（次数 / 参数） | 最复杂 | "断言 Generate 只被调了 1 次" |
 
-## 6.10 Git Bash on Windows 中文编码陷阱
+**怎么选**：
+- 只关心"返什么"，不关心"怎么被调" → **stub**（最便宜）
+- 需要让测试做完整流程（写入后能读出来） → **fake**
+- 关键是**调用次数/顺序/参数**本身就是要测的契约 → **mock**
+
+**项目体现**：Plan 4 Orchestrator 测试用了三种全部——`fakeStoryRepo` 记录写入的 Story（fake），`stubBudget{allow:true}` 永远放行（stub），`mock.Calls == 0` 断言 PreCheck 拒绝时 LLM 没被调（mock）。
+
+**类比**：拍电影里，stub=道具汽车（外形对就行），fake=能开但只能开 5 公里的轿车，mock=能开还能记录"司机踩了几次刹车"的车。
+
+**为什么需要**：单元测试要在毫秒级跑完——不能真起 PG 或调豆包。但更深层的原因是：单测的目的是"测当前函数的逻辑"，不是"测依赖"。用替身锁死依赖行为，逻辑 bug 才能被精准定位。
+
+**陷阱**：mock 滥用会导致"测试和实现长一样"——改实现就要改一堆 mock 断言，重构寸步难行。**优先 stub/fake，少用 mock**。
+
+## 6.10 异步测试：require.Eventually 而不是 sleep
+测试**异步流程**（Worker 处理事件、缓存过期、消息送达）时，最朴素的写法是：
+```go
+go w.Run(ctx)
+time.Sleep(2 * time.Second)  // ❌ 等 worker 处理
+assert.Equal(t, "done", reload(eventID).Status)
+```
+两个问题：**(1)** 太短会 flaky（CI 慢一拍就挂），**(2)** 太长拖测试速度。
+
+正确写法用 testify 的 `require.Eventually`：
+```go
+require.Eventually(t, func() bool {
+    var ev model.OutboxEvent
+    db.First(&ev, eventID)
+    return ev.Status == "done"
+}, 2*time.Second, 50*time.Millisecond, "event should be done")
+```
+含义：**最多等 2 秒，每 50ms 重试一次**——条件成立立刻返回。机器快时几十毫秒就过，机器慢也最多等 2s。
+
+**为什么需要**：异步系统时长不确定（网络抖动、调度延迟）。固定 sleep 是**用大 buffer 换稳定性**——浪费时间还不一定够。Eventually 是**轮询直到成立**——用最少时间换最强稳定性。
+
+**项目体现**：Plan 4 worker_test 验证 outbox 事件被消费用的就是 Eventually 模式——预期几十毫秒就成立但 CI 慢时给 2s 容忍。
+
+**类比**：等外卖。固定 sleep = "我每次都坐 30 分钟然后才下楼"——快了浪费时间慢了错过。Eventually = "每 5 分钟下楼看一眼，看到就拿"——既不亏又不漏。
+
+## 6.11 Git Bash on Windows 中文编码陷阱
 Git Bash 默认 locale 是 **GBK / CP936**。当用 `curl -d '{"prompt":"中文"}'` 发请求时，bash 会把命令行参数中的 UTF-8 字符串按 GBK 重编码为字节，发到服务端被当 UTF-8 解码 → 乱码。
 
 **项目体现**：Plan 4 smoke 测试时红线词"血腥"未被拦截，根因就是这个——服务端 PreCheck 收到的根本不是"血腥"两字的 UTF-8 字节，而是 GBK 重编码后的乱码字节，匹配不到红线词库里的"血"。
