@@ -13,6 +13,8 @@ type MemoryRepo interface {
 	Create(ctx context.Context, m *model.Memory) error
 	// RecentByChild returns up to limit recent memories of the given type.
 	RecentByChild(ctx context.Context, childID int64, memoryType string, limit int) ([]*model.Memory, error)
+	// RecentByChildTypes filters by IN (types...). If types is empty, returns nothing.
+	RecentByChildTypes(ctx context.Context, childID int64, types []string, limit int) ([]*model.Memory, error)
 }
 
 type memoryRepo struct {
@@ -24,6 +26,22 @@ func NewMemoryRepo(db *gorm.DB) MemoryRepo { return &memoryRepo{db: db} }
 
 func (r *memoryRepo) Create(ctx context.Context, m *model.Memory) error {
 	return r.db.WithContext(ctx).Create(m).Error
+}
+
+func (r *memoryRepo) RecentByChildTypes(ctx context.Context, childID int64, types []string, limit int) ([]*model.Memory, error) {
+	if len(types) == 0 {
+		return []*model.Memory{}, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	var out []*model.Memory
+	err := r.db.WithContext(ctx).
+		Where("child_id = ? AND memory_type IN ?", childID, types).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
 }
 
 func (r *memoryRepo) RecentByChild(ctx context.Context, childID int64, memoryType string, limit int) ([]*model.Memory, error) {
