@@ -33,6 +33,7 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 	bm.MemorySummaryTotal.WithLabelValues("ok").Inc()
 	bm.MemorySummaryTotal.WithLabelValues("fail").Inc()
 	bm.BootstrapCompletionTotal.Inc()
+	bm.LLMFailFallbackTotal.WithLabelValues("doubao", "doubao-lite", "upstream_error").Inc()
 
 	mf, err := reg.Gather()
 	require.NoError(t, err)
@@ -60,6 +61,7 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 		"memory_summary_duration_seconds",
 		"memory_summary_total",
 		"bootstrap_completion_total",
+		"llm_fail_fallback_total",
 	} {
 		assert.Contains(t, joined, want, "missing metric %s", want)
 	}

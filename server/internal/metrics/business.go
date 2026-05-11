@@ -27,6 +27,9 @@ type Business struct {
 	MemorySummaryDuration    prometheus.Histogram
 	MemorySummaryTotal       *prometheus.CounterVec // labels: status (ok|fail)
 	BootstrapCompletionTotal prometheus.Counter
+
+	// Plan 6b
+	LLMFailFallbackTotal *prometheus.CounterVec // labels: provider, model, reason
 }
 
 // NewBusiness registers all business metrics on reg and returns the bundle.
@@ -145,6 +148,12 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 				Help: "Count of successful BOOTSTRAP answer submissions.",
 			},
 		),
+		LLMFailFallbackTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "llm_fail_fallback_total",
+				Help: "Count of LLM call fail-open events (upstream error or unparseable), by provider/model/reason.",
+			}, []string{"provider", "model", "reason"},
+		),
 	}
 	reg.MustRegister(
 		b.StoryGenerateTotal,
@@ -165,6 +174,7 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 		b.MemorySummaryDuration,
 		b.MemorySummaryTotal,
 		b.BootstrapCompletionTotal,
+		b.LLMFailFallbackTotal,
 	)
 	return b
 }
