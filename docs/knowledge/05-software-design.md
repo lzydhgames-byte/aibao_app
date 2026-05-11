@@ -137,3 +137,19 @@ api → service → repository + gateway → pkg
 **判定哪些工作可以异步的口诀**：用户**拿到当前响应后会立刻消费**的，就是同步必须等的；用户**消费完当前响应才会用到**的，就可以异步。爱宝故事：文本=立刻读=同步必须等；音频=读完才会想"哎我要听版"=可以异步。
 
 **项目体现细节**：`tts_synthesis` 写进 outbox 表（事务保证不丢），Worker 后台消费，audio_status 三态机供 client 轮询。这是 [5.7 Outbox Pattern](#57-outbox-pattern事务出箱模式) 与异步思想的具体结合。
+
+
+## 5.16 Outbox 事件 payload 不可后改
+
+Outbox Pattern 的事件一旦 INSERT 进 `outbox_events` 表，**Go 内存里那个 `*OutboxEvent` 对象的修改不会同步到 DB**。常见陷阱是"先 INSERT 占位、后填补真值"：业务代码在事务结束、拿到自增主键后想 patch payload 里的 id 字段——但 patch 只改了内存。Worker 拉到的 payload 永远是事务结束时的"占位"值。
+
+**正确做法**（三选一）：
+1. 用 outbox row 的 `aggregate_id` 字段持有那些"事务后才知道"的 id —— `CreateWithOutbox` 内部填，跨进程可见
+2. Handler 进来时**再 query 一次**最新 entity（接受多一次 DB 往返）
+3. 业务先写 entity 拿 id、再单独 INSERT outbox（**牺牲事务原子性**，不推荐）
+
+**为什么需要**：分布式系统里"内存修改不等于持久化"是基本功，但**事务边界**让事情变隐晦——业务代码看到事务返回的 `entity.ID`，自然想"顺手 patch 一下"payload，殊不知事件已经写出去了。这是 Plan 4 埋下、Plan 6 暴露的真实 bug 模板。
+
+**项目体现**：Plan 6 commit `4b522f3` — memory_update handler 改成"优先 `e.AggregateID`，payload.story_id 仅做兜底"。Plan 5 tts_synthesis 早就这么做了。
+
+**类比**：邮件——投出后改本地草稿不影响收件人看到的内容。要更正只能再发一封。

@@ -10,8 +10,8 @@
 
 ## 2. 当前阶段
 
-**Plan 1 + 2 + 3 + 4 + 5 全部实现并通过冒烟。**
-当前下一步：写 Plan 6（按 spec 顺序——音频混音 + BGM，或 storyline 多集叙事）。
+**Plan 1 + 2 + 3 + 4 + 5 + 6 全部实现并通过冒烟。**
+当前下一步：Plan 6b / 7（BGM 混音 / 连续剧模式 / Flutter 客户端 —— 按 spec 顺序由用户选）。
 
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)
@@ -21,6 +21,7 @@
 - 已完成的 Plan 3：[docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md](docs/superpowers/plans/2026-05-07-plan-03-safety-and-prompt-builder.md)
 - 已完成的 Plan 4：[docs/superpowers/plans/2026-05-08-plan-04-story-generation.md](docs/superpowers/plans/2026-05-08-plan-04-story-generation.md)
 - 已完成的 Plan 5：[docs/superpowers/plans/2026-05-11-plan-05-tts-and-storage.md](docs/superpowers/plans/2026-05-11-plan-05-tts-and-storage.md)
+- 已完成的 Plan 6：[docs/superpowers/plans/2026-05-11-plan-06-bootstrap-and-memory.md](docs/superpowers/plans/2026-05-11-plan-06-bootstrap-and-memory.md)
 
 ### 已落地的能力（不要重做）
 - 后端骨架（Go + Gin + GORM + slog + Prometheus + 健康检查 + 优雅关停）
@@ -42,7 +43,11 @@
 - **Storage Gateway 抽象**（Tencent COS + Mock；私有 bucket + 15 分钟签名 URL）
 - **异步音频管线**（POST /generate 立即返回 + `tts_synthesis` Worker handler + `audio_status` 3 态 `pending/ready/failed`）
 - **GET /api/v1/stories/:id/audio_url**（3 态分支 + 所有权校验 + 15 分钟签名 URL）
-- 知识库 11 主题 120+ 词条（用户复盘用）
+- **BOOTSTRAP 首次相遇仪式**（7 题表单 + LLM 润色 `children.profile.description`）
+- **Memory Summarizer**（doubao-1.5-lite 生成 30 字极短摘要，与长版并写 weight=1.2 高优先级 row）
+- **Memory Selector**（注入近 3 条 memory 到 `BuildInput.MemorySummary`，故事生成前自动调用）
+- **System prompt 首次/回调双分支模板**（首次相遇 vs 含"上次故事记忆"软提示）
+- 知识库 11 主题 130+ 词条（用户复盘用）
 
 ### 端到端可演示接口（已通过冒烟）
 - `GET /health` `GET /ready` `GET /metrics`
@@ -53,6 +58,8 @@
 - `POST /api/v1/stories/generate`（需 Bearer JWT）
 - `GET /api/v1/stories/:id`（需 Bearer JWT）
 - `GET /api/v1/stories/:id/audio_url`（需 Bearer JWT；15 分钟 COS 签名 URL）
+- `GET /api/v1/bootstrap/questions`（需 Bearer JWT；7 题问卷 + version）
+- `POST /api/v1/bootstrap/answers`（需 Bearer JWT；LLM 润色后写 children.profile.description）
 
 ### CLI 可演示
 - `safetycheck precheck "..."` —— 前置预审

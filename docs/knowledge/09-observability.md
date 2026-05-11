@@ -113,3 +113,19 @@ llm_budget_used_yuan                # 今日预算消耗
 **实现**：Redis key `budget:llm:daily:YYYYMMDD` 累加每次调用的费用估算；每次调外部 API 前检查；超阈值返 503。次日 0 点 key 过期自动重置。  
 **为什么需要**：LLM 按 token 计费，bug 或恶意刷接口能一夜烧光月预算。预算熔断是"宁可拒服务也不破产"的工程化止损。  
 项目策略：100 元/天，足够 1500 次故事生成；超额停服等于"今天测试够了，明天接着来"。
+
+
+## 9.14 fail-open 必须配指标告警
+
+「fail-open」哲学（依赖挂了不阻塞用户、记日志放行）能保住用户体验，**代价**是 bug 会"无声地"积累——表面功能正常、实际依赖链路全断。Plan 4 时 intent endpoint 配错（绑了文生图模型），意图分类调 LLM 全部 404；fail-open 兜底返回 IntentSafe，**业务无感知**。直到 Plan 6 让 intent_model 承担 Bootstrap profile 润色 + memory summary 等"真有用"的工作，bug 才浮出来。
+
+**配套指标必须满足**：
+- 每个 fail-open 决策点都有 `*_fail_fallback_total` 计数器（按 reason 标签分类）
+- 告警规则：`rate(fail_fallback_total) / rate(*_call_total) > 30% over 5min` → 立刻通知
+- 当指标值长期 > 一个低阈值（例如 5%）就视为"链路坏了，请人工查"
+
+**为什么需要**：没指标告警的 fail-open 等于把 bug 攒着到下游用户那里集中爆发。**Plan 4 → Plan 6 真实复盘**：如果当时 intent_llm 有告警，2 周前就发现 Seedream 模型不能调 chat 接口。
+
+**项目体现**：Plan 4 metrics 已有 `safety_fail_total{stage,reason}`，但 fail-open 路径（如 intent_llm.fail_fallback_safe）没单独 counter。**Plan 6b/7 应补一个 `llm_fail_fallback_total{provider,model,reason}`**。
+
+**类比**：办公楼火警系统——「火灾时电梯不停留」（fail-open 让人能跑）是必须的，但如果烟感传感器全坏了你没指标看到，等真火灾时就来不及了。

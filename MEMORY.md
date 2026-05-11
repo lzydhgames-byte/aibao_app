@@ -137,6 +137,15 @@
 - 端到端真链路冒烟通过：POST 16.3s（audio_status=pending）→ T+6s ready → 880KB / 54s mp3
 - 业务 metrics 真埋上：tts_call_duration_seconds / storage_upload_duration_seconds / audio_ready_total
 
+### Plan 6（2026-05-12 完成，16 Task）BOOTSTRAP + 记忆深化 + 彩蛋管线
+- BOOTSTRAP onboarding：`GET /bootstrap/questions`（7 题 + version）+ `POST /bootstrap/answers`（验证 → LLM 润色 → 写 `children.profile.description`）
+- Memory Summarizer（doubao-1.5-lite-32k 极短 30 字摘要，与长版并写两行 memory：weight=1.0 长版 + weight=1.2 短版）
+- Memory Selector（查询 child 近 3 条 `[story_summary, interest]` memory，拼接注入 `BuildInput.MemorySummary`）
+- System Prompt 首次/回调双分支模板（含"可以自然回调"软提示）
+- 端到端真链路冒烟通过：BOOTSTRAP 润色 2.3s / 故事真生成 15s / Selector 注入 675 字 context 验证
+- **修复 2 个 latent bug**：(1) outbox event payload 事务后 patch 不持久化（Plan 4 埋, Plan 6 显形, fix=优先 e.AggregateID）；(2) intent_model endpoint 绑了文生图 Seedream 模型（Plan 4 埋, Plan 4/5 fail-open 兜底掩盖, Plan 6 让 IntentModel 真干活时暴露）
+- **Known issues 留给 Plan 6b**：BOOTSTRAP 润色没传 nickname / PostCheck minProtagonistOccurrences=3 太严 / 软提示彩蛋实测 LLM 不听需升级 prompt
+
 ### Plan 4（2026-05-09 完成，22 Task）故事生成 + LLM Gateway + Outbox Worker
 - LLM Gateway 抽象（Doubao OpenAI 兼容 + Mock + BudgetGate 预算熔断）
 - Story Orchestrator（PreCheck → Prompt → LLM → PostCheck → Fallback → Persist 同事务）
@@ -169,6 +178,7 @@
 - **2026-05-08** — Plan 3 全部 12 Task 完成，CLI demo 通过；覆盖率 90.9%/81.2%
 - **2026-05-09** — Plan 4 完成：LLM Gateway + Story Orchestrator + Outbox Worker 全栈实现，端到端真豆包生成验证通过
 - **2026-05-11** — Plan 5 完成：TTS (Minimax) + 异步音频管线 + COS 存储，端到端 6 秒出音频（POST 文本立即返回，后台 TTS+上传 ~6s 完成）
+- **2026-05-12** — Plan 6 完成：BOOTSTRAP 首次相遇仪式 + 记忆深化（Summarizer + Selector）+ 彩蛋串联管线（含 2 个 latent bugfix：outbox payload 后改不生效 / intent_model endpoint 配错文生图模型）
 
 ## 关键技术教训（来自实施过程）
 
@@ -185,3 +195,6 @@
 - **COS Bucket 命名陷阱**（Plan 5）：腾讯云 COS 控制台显示完整名 `<short>-<appid>`，但 cos-go-sdk-v5 期望传入**短名**——SDK 内部自动拼 `-<appid>`。运维者很容易把完整名贴进配置 → SDK 又拼一次 → 404 NoSuchBucket。生产代码必须容错"完整名/短名"二义性输入：`if !strings.HasSuffix(Bucket, "-"+AppID) { Bucket = Bucket + "-" + AppID }`。同类陷阱出现在 S3、阿里 OSS。已记录知识库 10。
 - **异步音频路径的体验价值**（Plan 5）：实测 TTS + COS 上传仅 ~6 秒——比 LLM 文本生成 16 秒还短。即便如此，**走异步**让用户在 16s 拿到文本立即可读，比同步路径等满 22s 体验好得多。感知延迟 = 总延迟 × 用户专注度——把"不必专注等待"的工作甩到后台是 UX 设计的核心手段。已记录知识库 5.15。
 - **smoke 前先做基础设施连通性预测试**（Plan 5）：Plan 4 教训沉淀，Plan 5 接 COS 和 Minimax 时分别先用一次性 `smoke-cos/main.go` / `smoke-tts/main.go`（脱离项目代码、裸 SDK 调用）验证凭证 + bucket + voice_id，提前发现 region 不匹配 + 子账号策略未绑 + bucket 双拼问题。这类问题在应用层 smoke 才暴露会被业务逻辑包装错误信息淹没，定位至少 ×3 时间。已记录知识库 6.12。
+- **outbox event 的 payload 不可后改**（Plan 6 暴露的 Plan 4 旧坑）：一旦 outbox row INSERT 进表，Go 内存里那个 `*OutboxEvent` 对象的修改不会同步到 DB。常见陷阱是事务里"先 INSERT 占位、后填补真值"——Orchestrator 在事务里写 outbox 时 story.ID 还没生成，事务后 patch payload.story_id 只改了内存。Handler 拉到的 payload 永远是占位值 0。**正确做法**：用 outbox row 的 `aggregate_id` 字段（CreateWithOutbox 内部填）承载这类"事务后才知道"的 id，或 handler 进来时再 query 一次最新 entity。Plan 4 埋下、Plan 5 tts_synthesis 已绕过、Plan 6 memory FK 才真正暴露。已记录知识库 5.16。
+- **fail-open 链路让 bug 推迟到下一个 plan 才显形**（Plan 6 暴露的 Plan 4 旧坑）：Plan 4 时 intent_model endpoint 绑成 Doubao-Seedream-5.0-lite（文生图模型，不接受 chat completion）——意图分类 LLM 全部 404，但 fail-open 兜底到 IntentSafe，**业务功能无感**。Plan 6 让 IntentModel 真干活（Bootstrap polish + Memory summary），bug 立刻浮出。**教训**：fail-open 链路必须配指标告警（`rate(*_fail_fallback_total) / rate(*_call_total) > 30% over 5min` 触发），否则 latent bug 累积到下游集中爆发。修复需要 Volcengine 控制台新建 endpoint。已记录知识库 9.14。
+- **软提示 prompt 工程的局限**（Plan 6 实测）：把"上次故事的 30 字总结"塞进 system prompt 尾部 + 写"可以自然回调"，LLM 仍倾向沿着 user prompt 自由发挥，对 memory context **几乎不响应**——Plan 6 smoke 海洋故事记忆 + 森林新主题 → 故事 3 完全没出现海洋元素。"软提示"哲学优雅但效果弱。后续要么把 memory 段抬到更高优先级位置、要么改用更明确"请尝试借用..."措辞、要么加一轮"故事编辑 LLM call"检查回调是否出现并 force regenerate。**先验证、后优化、再上线**是 prompt 工程的标准节奏。已记录知识库 11.10。
