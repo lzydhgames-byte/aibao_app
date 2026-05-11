@@ -22,6 +22,9 @@ func (f *fakeMem) Create(_ context.Context, m *model.Memory) error {
 func (f *fakeMem) RecentByChild(_ context.Context, _ int64, _ string, _ int) ([]*model.Memory, error) {
 	return f.created, nil
 }
+func (f *fakeMem) RecentByChildTypes(_ context.Context, _ int64, _ []string, _ int) ([]*model.Memory, error) {
+	return f.created, nil
+}
 
 func TestMemoryUpdate_HandleHappy(t *testing.T) {
 	mem := &fakeMem{}
