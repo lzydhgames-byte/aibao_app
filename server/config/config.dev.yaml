@@ -33,7 +33,7 @@ crypto:
 llm:
   provider: doubao
   story_model: ep-m-20260318190252-2rxkc   # Doubao-1.5-pro-32k endpoint
-  intent_model: ep-m-20260318190754-rl8nn   # Doubao-Seedream-5.0-lite endpoint
+  intent_model: ep-20260511153638-cstj9     # Doubao-1.5-lite-32k endpoint (text classification + summary + profile)
   base_url: https://ark.cn-beijing.volces.com/api/v3
   timeout_seconds: 30
   max_retries: 1
