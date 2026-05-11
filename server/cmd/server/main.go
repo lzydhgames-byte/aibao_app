@@ -258,7 +258,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load safety rules: %w", err)
 	}
-	intentProvider := safety.NewLLMIntentProvider(llmClient, cfg.LLM.IntentModel)
+	intentProvider := safety.NewLLMIntentProvider(llmClient, cfg.LLM.IntentModel, bm)
 	preChecker := safety.NewPreChecker(rs, intentProvider)
 	postChecker := safety.NewPostChecker(rs)
 

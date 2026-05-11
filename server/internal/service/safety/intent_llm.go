@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/aibao/server/internal/gateway/llm"
+	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/pkg/logger"
 )
 
@@ -12,13 +13,15 @@ import (
 // intent (e.g. "I want a violent story"). On any LLM failure, returns
 // IntentSafe and logs — we never block a user because the LLM hiccupped.
 type LLMIntentProvider struct {
-	c     llm.Client
-	model string
+	c       llm.Client
+	model   string
+	metrics *metrics.Business
 }
 
 // NewLLMIntentProvider constructs a provider backed by an LLM client.
-func NewLLMIntentProvider(c llm.Client, model string) *LLMIntentProvider {
-	return &LLMIntentProvider{c: c, model: model}
+// metrics may be nil (tests).
+func NewLLMIntentProvider(c llm.Client, model string, biz *metrics.Business) *LLMIntentProvider {
+	return &LLMIntentProvider{c: c, model: model, metrics: biz}
 }
 
 const intentSystemPrompt = `你是一个儿童故事请求安全分类器。判断输入是否表达了"想要不适合儿童的故事内容"的意图。
@@ -42,6 +45,9 @@ func (p *LLMIntentProvider) Classify(ctx context.Context, userPrompt string) (In
 	})
 	if err != nil {
 		logger.FromCtx(ctx).Warn("safety.intent_llm.fail_fallback_safe", "err", err.Error())
+		if p.metrics != nil {
+			p.metrics.LLMFailFallbackTotal.WithLabelValues("doubao", p.model, "upstream_error").Inc()
+		}
 		return IntentSafe, nil
 	}
 	switch strings.TrimSpace(strings.ToLower(resp.Text)) {
@@ -53,6 +59,9 @@ func (p *LLMIntentProvider) Classify(ctx context.Context, userPrompt string) (In
 		return IntentUncertain, nil
 	default:
 		logger.FromCtx(ctx).Warn("safety.intent_llm.unparseable", "raw", resp.Text)
+		if p.metrics != nil {
+			p.metrics.LLMFailFallbackTotal.WithLabelValues("doubao", p.model, "unparseable").Inc()
+		}
 		return IntentSafe, nil
 	}
 }
