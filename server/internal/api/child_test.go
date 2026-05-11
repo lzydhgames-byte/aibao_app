@@ -139,6 +139,37 @@ func TestChild_Update_OK(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "n2")
 }
 
+func TestCreateChild_RejectsNonUTF8Nickname(t *testing.T) {
+	r, _ := setupChild(t, 7)
+	badBytes := []byte{0xc8, 0xed, 0xa1, 0xa1}
+	body := []byte(`{"nickname":"`)
+	body = append(body, badBytes...)
+	body = append(body, []byte(`","gender":"boy","birthday":"2020-08-15"}`)...)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/children", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_nickname")
+}
+
+func TestUpdateChild_RejectsNonUTF8Nickname(t *testing.T) {
+	r, _ := setupChild(t, 7)
+	require.Equal(t, http.StatusCreated, doJSON(r, http.MethodPost, "/api/v1/children", map[string]string{
+		"nickname": "ok", "gender": "boy", "birthday": "2020-08-15",
+	}).Code)
+	badBytes := []byte{0xc8, 0xed, 0xa1, 0xa1}
+	body := []byte(`{"nickname":"`)
+	body = append(body, badBytes...)
+	body = append(body, []byte(`"}`)...)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/children/1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_nickname")
+}
+
 func TestChild_Update_Forbidden(t *testing.T) {
 	r, _ := setupChild(t, 7)
 	doJSON(r, http.MethodPost, "/api/v1/children", map[string]string{
