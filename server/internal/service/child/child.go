@@ -32,6 +32,7 @@ type UpdateInput struct {
 	Nickname *string
 	Gender   *string
 	Birthday *time.Time
+	Profile  *[]byte // Plan 6: BOOTSTRAP-rendered profile JSON. nil = don't touch.
 }
 
 var validGenders = map[string]bool{"boy": true, "girl": true, "unspecified": true}
@@ -103,6 +104,9 @@ func (s *Service) Update(ctx context.Context, userID, childID int64, in UpdateIn
 	}
 	if in.Birthday != nil {
 		c.Birthday = *in.Birthday
+	}
+	if in.Profile != nil {
+		c.Profile = *in.Profile
 	}
 	if err := s.repo.Update(ctx, c); err != nil {
 		return nil, apperr.Wrap(err, apperr.CodeInternal, "child_update_failed", "服务暂时不可用")

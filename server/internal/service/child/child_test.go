@@ -143,6 +143,18 @@ func TestUpdate_HappyPath(t *testing.T) {
 	assert.Equal(t, "n2", got.Nickname)
 }
 
+func TestUpdate_ProfileOnly(t *testing.T) {
+	svc, repo := newSvc()
+	c, _ := svc.Create(context.Background(), 1, CreateInput{Nickname: "n", Gender: "boy", Birthday: bday(t, "2020-08-15")})
+
+	raw := []byte(`{"version":1,"description":"hi"}`)
+	got, err := svc.Update(context.Background(), 1, c.ID, UpdateInput{Profile: &raw})
+	require.NoError(t, err)
+	assert.Equal(t, "n", got.Nickname, "nickname should be unchanged")
+	assert.Equal(t, "boy", got.Gender, "gender should be unchanged")
+	assert.JSONEq(t, `{"version":1,"description":"hi"}`, string(repo.byID[c.ID].Profile))
+}
+
 func TestUpdate_NotFound(t *testing.T) {
 	svc, _ := newSvc()
 	newName := "x"
