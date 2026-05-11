@@ -10,8 +10,9 @@
 
 ## 2. 当前阶段
 
-**Plan 1 + 2 + 3 + 4 + 5 + 6 全部实现并通过冒烟。**
-当前下一步：Plan 6b / 7（BGM 混音 / 连续剧模式 / Flutter 客户端 —— 按 spec 顺序由用户选）。
+**Plan 1 + 2 + 3 + 4 + 5 + 6 + 6b 全部实现并通过冒烟。**
+Plan 6b 完成（2026-05-13）：5 项 Plan 6 已知问题修复落地，第二个故事真实现彩蛋回调（Story 23 → Story 22 小精灵）。
+当前下一步：Plan 7（BGM 混音 / 连续剧+HEARTBEAT / Flutter 客户端 / 部署 —— 按 spec 顺序由用户选）。
 
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)

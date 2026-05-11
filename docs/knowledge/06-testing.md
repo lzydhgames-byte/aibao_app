@@ -151,3 +151,26 @@ smoke-tts/main.go   —— 调 t2a_v2 合成"你好爱宝" → 写本地 mp3 播
 **类比**：装修前先**单独**测试水电——通水通电了再做防水做地板。如果直接铺地板再发现水管漏水，要砸地板重做。基础设施 smoke 就是"先测水电"。
 
 **操作惯例**：smoke 脚本**不入仓**（写完即删，或加 `.gitignore` 规则）。知识库这里记录用法即可。Plan 5 提交时已通过 `.gitignore` 排除 `smoke-*` 目录（见 commit 9be2c0b）。
+
+## 6.13 入口校验必须在 JSON unmarshal 之前
+
+校验请求体的字节合法性（UTF-8 / 长度 / charset）必须在 `json.Unmarshal` / `ShouldBindJSON` **之前**完成——因为 Go 的 `encoding/json` 在解析时会**静默替换非法 UTF-8 字节**为 U+FFFD（Unicode replacement character），导致 post-bind 看到的字符串"看起来是合法 UTF-8"但内容已被篡改。Plan 6b Issue 4 修复时踩了这个坑：直觉写法 `ShouldBindJSON → utf8.ValidString(req.Nickname)` 永远返 true，因为 Unmarshal 已经把坏字节悄悄替换了。
+
+**正确姿势**：
+```go
+raw, err := io.ReadAll(c.Request.Body)
+if err != nil { ... return 400 ... }
+if !utf8.Valid(raw) {
+    c.AbortWithStatusJSON(400, gin.H{"reason":"invalid_utf8", ...})
+    return
+}
+c.Request.Body = io.NopCloser(bytes.NewReader(raw)) // restore for ShouldBindJSON
+var req CreateReq
+if err := c.ShouldBindJSON(&req); err != nil { ... }
+```
+
+**为什么需要**：客户端可能恶意构造（或意外编码错误，如 Plan 4 Git Bash GBK 污染）非法字节体。如果服务端验证已经晚于 unmarshal，数据库里就会被"洗白"了的乱码污染——但实际显示出来仍是 U+FFFD 乱码（"�"）。**类比**：海关检查必须在通关前——东西进了境内再说"你这有问题"已经晚了。同理：先把入境护照（raw body）查完，再放行进境内（unmarshal）做后续处理。
+
+**适用范围更广**：不止 UTF-8——任何"字节层面的格式校验"（如签名验证、HMAC、敏感字段长度上限以字节计）都该走 raw body。"业务层面的字段校验"（如手机号格式、字段必填）才走 post-bind。
+
+**项目体现**：`server/internal/api/child.go` POST 和 PATCH 入口；commit `8a4d158`。

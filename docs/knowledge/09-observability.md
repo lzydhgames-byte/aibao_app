@@ -129,3 +129,5 @@ llm_budget_used_yuan                # 今日预算消耗
 **项目体现**：Plan 4 metrics 已有 `safety_fail_total{stage,reason}`，但 fail-open 路径（如 intent_llm.fail_fallback_safe）没单独 counter。**Plan 6b/7 应补一个 `llm_fail_fallback_total{provider,model,reason}`**。
 
 **类比**：办公楼火警系统——「火灾时电梯不停留」（fail-open 让人能跑）是必须的，但如果烟感传感器全坏了你没指标看到，等真火灾时就来不及了。
+
+**Plan 6b 落地**：Plan 4 埋的"intent endpoint 绑了文生图模型"bug 沉默 2 个 plan 才暴露，根因就是没指标。Plan 6b 在 3 个 fail-open 点（intent_llm / memory.Summarizer / bootstrap.renderDescription）都接入了 `llm_fail_fallback_total{provider,model,reason}` counter。**坑**：Prometheus `CounterVec` 在第一次 `.Inc()` 前**不会出现在 /metrics 输出里**——这是设计哲学（label 组合无穷可能，不能预先全枚举）。所以 dashboard 上"看不到曲线"≠ "未注册"——必须等业务真触发一次 fail-open。**生产实践**：组件启动时显式 `.WithLabelValues("doubao","ep-XX","upstream_error").Add(0)` 一次，让指标提前曝光为 0 行，方便告警规则写"过 0.05/秒"。
