@@ -31,6 +31,9 @@ type RouterDeps struct {
 
 	// Audio (Plan 5)
 	Audio *AudioHandler
+
+	// Bootstrap (Plan 6)
+	Bootstrap *BootstrapHandler
 }
 
 // NewRouter builds the gin.Engine with the standard middleware chain,
@@ -71,6 +74,9 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		}
 		if deps.Audio != nil {
 			deps.Audio.RegisterRoutes(auth)
+		}
+		if deps.Bootstrap != nil {
+			deps.Bootstrap.RegisterRoutes(auth)
 		}
 		if deps.Story != nil {
 			gen := auth.Group("")
