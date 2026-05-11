@@ -52,6 +52,7 @@ func (s *Summarizer) Summarize(ctx context.Context, storyText string) string {
 	if err != nil {
 		if s.biz != nil {
 			s.biz.MemorySummaryTotal.WithLabelValues("fail").Inc()
+			s.biz.LLMFailFallbackTotal.WithLabelValues("doubao", s.model, "upstream_error").Inc()
 		}
 		if s.logger != nil {
 			s.logger.Warn("memory.summarize.fail", "err", err)
