@@ -9,6 +9,7 @@ import (
 
 	"github.com/aibao/server/internal/gateway/llm"
 	"github.com/aibao/server/internal/metrics"
+	"github.com/aibao/server/internal/model"
 	apperr "github.com/aibao/server/internal/pkg/errors"
 	childsvc "github.com/aibao/server/internal/service/child"
 )
@@ -35,16 +36,26 @@ type ChildUpdater interface {
 	Update(ctx context.Context, userID, childID int64, in childsvc.UpdateInput) (any, error)
 }
 
-// childServiceAdapter adapts the concrete childsvc.Service into ChildUpdater.
+// ChildLookup fetches a child for nickname threading into the LLM prompt.
+type ChildLookup interface {
+	GetByID(ctx context.Context, userID, childID int64) (*model.Child, error)
+}
+
+// childServiceAdapter adapts the concrete childsvc.Service into ChildUpdater + ChildLookup.
 type childServiceAdapter struct{ inner *childsvc.Service }
 
 func (a *childServiceAdapter) Update(ctx context.Context, userID, childID int64, in childsvc.UpdateInput) (any, error) {
 	return a.inner.Update(ctx, userID, childID, in)
 }
 
+func (a *childServiceAdapter) GetByID(ctx context.Context, userID, childID int64) (*model.Child, error) {
+	return a.inner.GetByID(ctx, userID, childID)
+}
+
 // Service builds a profile from BOOTSTRAP answers.
 type Service struct {
 	children    ChildUpdater
+	lookup      ChildLookup
 	llmClient   llm.Client
 	model       string
 	temperature float64
@@ -54,8 +65,10 @@ type Service struct {
 
 // NewService constructs.
 func NewService(children *childsvc.Service, c llm.Client, model string, temperature float64, biz *metrics.Business, logger *slog.Logger) *Service {
+	adapter := &childServiceAdapter{inner: children}
 	return &Service{
-		children:    &childServiceAdapter{inner: children},
+		children:    adapter,
+		lookup:      adapter,
 		llmClient:   c,
 		model:       model,
 		temperature: temperature,
@@ -65,9 +78,15 @@ func NewService(children *childsvc.Service, c llm.Client, model string, temperat
 }
 
 // NewServiceWithUpdater is the test-friendly constructor that takes the
-// ChildUpdater interface directly.
+// ChildUpdater + ChildLookup interfaces directly. lookup may be nil for
+// tests that don't exercise nickname threading.
 func NewServiceWithUpdater(children ChildUpdater, c llm.Client, model string, temperature float64, biz *metrics.Business, logger *slog.Logger) *Service {
 	return &Service{children: children, llmClient: c, model: model, temperature: temperature, biz: biz, logger: logger}
+}
+
+// NewServiceWithLookup is like NewServiceWithUpdater but also wires a ChildLookup.
+func NewServiceWithLookup(children ChildUpdater, lookup ChildLookup, c llm.Client, model string, temperature float64, biz *metrics.Business, logger *slog.Logger) *Service {
+	return &Service{children: children, lookup: lookup, llmClient: c, model: model, temperature: temperature, biz: biz, logger: logger}
 }
 
 // Submit validates answers, calls LLM to render description (fail-open),
@@ -77,7 +96,15 @@ func (s *Service) Submit(ctx context.Context, userID, childID int64, answers []A
 	if err != nil {
 		return nil, err
 	}
-	description := s.renderDescription(ctx, answersMap) // "" on LLM error (fail-open)
+	nickname := ""
+	if s.lookup != nil {
+		if c, lerr := s.lookup.GetByID(ctx, userID, childID); lerr == nil && c != nil {
+			nickname = c.Nickname
+		} else if lerr != nil && s.logger != nil {
+			s.logger.Warn("bootstrap.lookup.fail", "err", lerr)
+		}
+	}
+	description := s.renderDescription(ctx, nickname, answersMap) // "" on LLM error (fail-open)
 	profile := &Profile{Version: Version, Description: description, Answers: answersMap}
 	raw, err := json.Marshal(profile)
 	if err != nil {
@@ -161,18 +188,22 @@ func contains(opts []string, v string) bool {
 	return false
 }
 
-func (s *Service) renderDescription(ctx context.Context, answers map[string]interface{}) string {
+func (s *Service) renderDescription(ctx context.Context, nickname string, answers map[string]interface{}) string {
 	userPayload, _ := json.Marshal(answers)
+	userContent := fmt.Sprintf("孩子昵称：%s。其他档案信息（JSON）：%s", nickname, string(userPayload))
 	out, err := s.llmClient.Generate(ctx, llm.GenerateRequest{
 		Model:       s.model,
 		Temperature: s.temperature,
 		MaxTokens:   300,
 		Messages: []llm.Message{
 			{Role: "system", Content: bootstrapSystemPrompt},
-			{Role: "user", Content: fmt.Sprintf("孩子信息（JSON）：%s", string(userPayload))},
+			{Role: "user", Content: userContent},
 		},
 	})
 	if err != nil {
+		if s.biz != nil {
+			s.biz.LLMFailFallbackTotal.WithLabelValues("doubao", s.model, "upstream_error").Inc()
+		}
 		if s.logger != nil {
 			s.logger.Warn("bootstrap.render.fail", "err", err)
 		}

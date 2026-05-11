@@ -77,6 +77,21 @@ func (s *Service) ListByUser(ctx context.Context, userID int64) ([]*model.Child,
 	return []*model.Child{c}, nil
 }
 
+// GetByID returns the child by id, enforcing ownership by userID.
+func (s *Service) GetByID(ctx context.Context, userID, childID int64) (*model.Child, error) {
+	c, err := s.repo.FindByID(ctx, childID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, apperr.New(apperr.CodeNotFound, "child_not_found", "未找到该孩子档案")
+	}
+	if err != nil {
+		return nil, apperr.Wrap(err, apperr.CodeInternal, "child_load_failed", "服务暂时不可用")
+	}
+	if c.UserID != userID {
+		return nil, apperr.New(apperr.CodePermissionDenied, "not_owner", "无权查看该孩子档案")
+	}
+	return c, nil
+}
+
 // Update mutates fields of an existing child belonging to userID.
 func (s *Service) Update(ctx context.Context, userID, childID int64, in UpdateInput) (*model.Child, error) {
 	c, err := s.repo.FindByID(ctx, childID)

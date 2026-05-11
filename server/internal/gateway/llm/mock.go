@@ -9,9 +9,10 @@ import (
 // MockClient is the test/dev LLM client. It returns a configurable response
 // or error and counts calls.
 type MockClient struct {
-	Response *GenerateResponse
-	Err      error
-	Calls    int
+	Response    *GenerateResponse
+	Err         error
+	Calls       int
+	LastRequest GenerateRequest
 }
 
 // NewMock returns a MockClient that always returns a placeholder story.
@@ -29,8 +30,9 @@ func NewMock() *MockClient {
 }
 
 // Generate returns the configured Response (or Err).
-func (m *MockClient) Generate(_ context.Context, _ GenerateRequest) (*GenerateResponse, error) {
+func (m *MockClient) Generate(_ context.Context, req GenerateRequest) (*GenerateResponse, error) {
 	m.Calls++
+	m.LastRequest = req
 	if m.Err != nil {
 		return nil, m.Err
 	}

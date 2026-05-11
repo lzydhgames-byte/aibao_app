@@ -8,14 +8,35 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/aibao/server/internal/gateway/llm"
 	"github.com/aibao/server/internal/metrics"
+	"github.com/aibao/server/internal/model"
 	apperr "github.com/aibao/server/internal/pkg/errors"
 	childsvc "github.com/aibao/server/internal/service/child"
 )
+
+type fakeChildLookup struct {
+	child *model.Child
+	err   error
+}
+
+func (f *fakeChildLookup) GetByID(_ context.Context, _, _ int64) (*model.Child, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.child, nil
+}
+
+func bootstrapCounterVal(t *testing.T, c prometheus.Counter) float64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, c.Write(&m))
+	return m.GetCounter().GetValue()
+}
 
 type fakeChildUpdater struct {
 	calls     int
@@ -143,6 +164,34 @@ func TestSubmit_LLMError_FailOpen(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", p.Description)
 	assert.Equal(t, 1, updater.calls, "answers persisted even when LLM fails")
+}
+
+func TestSubmit_ThreadsNicknameIntoLLMPrompt(t *testing.T) {
+	updater := &fakeChildUpdater{}
+	mock := llm.NewMock()
+	mock.Response = &llm.GenerateResponse{Text: "描述"}
+	biz := metrics.NewBusiness(prometheus.NewRegistry())
+	lookup := &fakeChildLookup{child: &model.Child{Nickname: "小宇"}}
+	svc := NewServiceWithLookup(updater, lookup, mock, "test-model", 0.8, biz, nullLogger())
+
+	_, err := svc.Submit(context.Background(), 1, 10, goodAnswers())
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(mock.LastRequest.Messages), 2)
+	userMsg := mock.LastRequest.Messages[len(mock.LastRequest.Messages)-1].Content
+	assert.Contains(t, userMsg, "小宇")
+	assert.Contains(t, userMsg, "孩子昵称")
+}
+
+func TestSubmit_LLMError_IncrementsFailFallbackCounter(t *testing.T) {
+	updater := &fakeChildUpdater{}
+	mock := llm.NewMock()
+	mock.Err = errors.New("upstream down")
+	biz := metrics.NewBusiness(prometheus.NewRegistry())
+	svc := NewServiceWithUpdater(updater, mock, "test-model", 0.8, biz, nullLogger())
+
+	_, err := svc.Submit(context.Background(), 1, 10, goodAnswers())
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), bootstrapCounterVal(t, biz.LLMFailFallbackTotal.WithLabelValues("doubao", "test-model", "upstream_error")))
 }
 
 func TestSubmit_PropagatesNotOwner(t *testing.T) {
