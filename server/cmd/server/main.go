@@ -33,7 +33,9 @@ import (
 	"github.com/aibao/server/internal/pkg/safehash"
 	"github.com/aibao/server/internal/repository"
 	authsvc "github.com/aibao/server/internal/service/auth"
+	"github.com/aibao/server/internal/service/bootstrap"
 	childsvc "github.com/aibao/server/internal/service/child"
+	memorysvc "github.com/aibao/server/internal/service/memory"
 	"github.com/aibao/server/internal/service/safety"
 	storysvc "github.com/aibao/server/internal/service/story"
 	"github.com/aibao/server/internal/worker"
@@ -182,7 +184,6 @@ func run() error {
 	)
 	m := metrics.New(reg)
 	bm := metrics.NewBusiness(reg)
-	_ = bm // reserved for future orchestrator instrumentation
 
 	// TTS client (Plan 5)
 	var ttsClient tts.Client
@@ -261,18 +262,25 @@ func run() error {
 	preChecker := safety.NewPreChecker(rs, intentProvider)
 	postChecker := safety.NewPostChecker(rs)
 
+	// Plan 6: memory summarizer (post-story LLM) + selector (pre-story injection).
+	memorySummarizer := memorysvc.NewSummarizer(llmClient, cfg.LLM.IntentModel, 0.3, bm, lg)
+	memorySelector := memorysvc.NewSelector(memoryRepo, 3, lg)
+	bootstrapSvc := bootstrap.NewService(childService, llmClient, cfg.LLM.IntentModel, 0.5, bm, lg)
+	bootstrapHandler := api.NewBootstrapHandler(bootstrapSvc)
+
 	orch, err := storysvc.NewOrchestrator(storysvc.Deps{
-		Stories:       storyRepo,
-		Children:      childRepo,
-		LLM:           llmClient,
-		Budget:        budget,
-		PreCheck:      preChecker,
-		PostCheck:     postChecker,
-		PromptTmpl:    "safety/system_prompt.tmpl",
-		FallbackDir:   "safety/fallback_stories",
-		StoryModel:    cfg.LLM.StoryModel,
-		Temperature:   cfg.LLM.StoryTemperature,
-		PromptVersion: "v1",
+		Stories:        storyRepo,
+		Children:       childRepo,
+		LLM:            llmClient,
+		Budget:         budget,
+		PreCheck:       preChecker,
+		PostCheck:      postChecker,
+		MemorySelector: memorySelector,
+		PromptTmpl:     "safety/system_prompt.tmpl",
+		FallbackDir:    "safety/fallback_stories",
+		StoryModel:     cfg.LLM.StoryModel,
+		Temperature:    cfg.LLM.StoryTemperature,
+		PromptVersion:  "v1",
 	})
 	if err != nil {
 		return fmt.Errorf("init orchestrator: %w", err)
@@ -301,6 +309,7 @@ func run() error {
 		GenRateLimit: genRateLimit,
 		BudgetGuard:  budgetGuard,
 		Audio:        audioHandler,
+		Bootstrap:    bootstrapHandler,
 	})
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
@@ -313,7 +322,7 @@ func run() error {
 			BackoffBase:  time.Duration(cfg.Worker.BackoffBaseSeconds) * time.Second,
 			BackoffMax:   time.Duration(cfg.Worker.BackoffMaxSeconds) * time.Second,
 		})
-		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo, nil, nil))
+		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo, storyRepo, memorySummarizer))
 		w.Register(model.EventTypeTTSSynthesis, handlers.NewTTSSynthesisHandler(
 			storyRepo, storyRepo,
 			ttsClient, storageClient,
