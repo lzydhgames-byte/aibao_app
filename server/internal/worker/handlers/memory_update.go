@@ -54,17 +54,28 @@ func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	if err := json.Unmarshal(e.Payload, &p); err != nil {
 		return fmt.Errorf("decode payload: %w", err)
 	}
+	// Resolve story_id: payload value is the orchestrator's stale snapshot
+	// (set to 0 before the transaction filled story.ID). Trust e.AggregateID
+	// when payload value is missing — same pattern as tts_synthesis handler.
+	storyID := p.StoryID
+	if storyID == 0 && e.AggregateID != nil {
+		storyID = *e.AggregateID
+	}
+
 	innerJSON, err := json.Marshal(p)
 	if err != nil {
 		return fmt.Errorf("re-encode payload: %w", err)
 	}
-	storyIDPtr := p.StoryID
+	var storyFK *int64
+	if storyID > 0 {
+		storyFK = &storyID
+	}
 	if err := h.memories.Create(ctx, &model.Memory{
 		ChildID:    p.ChildID,
 		MemoryType: model.MemoryTypeStorySummary,
 		Payload:    innerJSON,
 		Weight:     1.0,
-		StoryID:    &storyIDPtr,
+		StoryID:    storyFK,
 	}); err != nil {
 		return err
 	}
@@ -73,7 +84,10 @@ func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	if h.summarizer == nil || h.stories == nil {
 		return nil
 	}
-	story, err := h.stories.FindByID(ctx, p.StoryID)
+	if storyID == 0 {
+		return nil
+	}
+	story, err := h.stories.FindByID(ctx, storyID)
 	if err != nil || story == nil {
 		return nil
 	}
@@ -84,7 +98,7 @@ func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	sumPayload, _ := json.Marshal(map[string]interface{}{
 		"type":          "story_summary",
 		"summary":       summary,
-		"story_id":      p.StoryID,
+		"story_id":      storyID,
 		"title":         p.Title,
 		"used_fallback": p.UsedFallback,
 	})
@@ -93,7 +107,7 @@ func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 		MemoryType: model.MemoryTypeStorySummary,
 		Payload:    sumPayload,
 		Weight:     1.2,
-		StoryID:    &storyIDPtr,
+		StoryID:    storyFK,
 	})
 	return nil
 }
