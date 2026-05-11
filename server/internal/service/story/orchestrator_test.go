@@ -221,3 +221,78 @@ func TestOrchestrator_PostCheckRejectionTriggersFallback(t *testing.T) {
 	assert.Contains(t, out.TextContent, "小宇")
 	_ = repo
 }
+
+type fakeMemorySelector struct {
+	out    string
+	called bool
+}
+
+func (f *fakeMemorySelector) BuildContext(_ context.Context, _ int64) string {
+	f.called = true
+	return f.out
+}
+
+func newOrchWithSelector(t *testing.T, mock llm.Client, sel MemorySelector) *Orchestrator {
+	rs := &safety.RuleSet{
+		Redlines:        map[string][]string{"violence": {"血腥"}},
+		AllRedlinesFlat: []string{"血腥"},
+		IPWhitelist:     map[string]string{},
+	}
+	orch, err := NewOrchestrator(Deps{
+		Stories:        &fakeStoryRepo{},
+		Children:       &fakeChildRepo{c: mkChild()},
+		LLM:            mock,
+		Budget:         &stubBudget{allow: true},
+		PreCheck:       safety.NewPreChecker(rs, safety.NewNoopIntentProvider()),
+		PostCheck:      safety.NewPostChecker(rs),
+		MemorySelector: sel,
+		PromptTmpl:     "../../../safety/system_prompt.tmpl",
+		FallbackDir:    "../../../safety/fallback_stories",
+		StoryModel:     "doubao-1.5-pro-32k",
+		Temperature:    0.8,
+		PromptVersion:  "v1",
+	})
+	require.NoError(t, err)
+	return orch
+}
+
+type capturingLLM struct {
+	lastSystem string
+	text       string
+}
+
+func (c *capturingLLM) Generate(_ context.Context, r llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	if len(r.Messages) > 0 {
+		c.lastSystem = r.Messages[0].Content
+	}
+	return &llm.GenerateResponse{Text: c.text}, nil
+}
+
+func (c *capturingLLM) HealthCheck(_ context.Context) error { return nil }
+
+func TestOrchestrator_MemorySelector_NonEmpty(t *testing.T) {
+	cl := &capturingLLM{text: "小宇决定出发。爱宝跟着。小宇带头前进。"}
+	sel := &fakeMemorySelector{out: "上次救了小恐龙"}
+	orch := newOrchWithSelector(t, cl, sel)
+	_, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "讲个故事",
+		Duration: 10, Style: "温馨治愈",
+	})
+	require.NoError(t, err)
+	assert.True(t, sel.called)
+	assert.Contains(t, cl.lastSystem, "上次救了小恐龙")
+}
+
+func TestOrchestrator_MemorySelector_EmptyStillGenerates(t *testing.T) {
+	mock := llm.NewMock()
+	mock.Response.Text = "小宇决定出发。爱宝跟着。小宇带头前进。"
+	sel := &fakeMemorySelector{out: ""}
+	orch := newOrchWithSelector(t, mock, sel)
+	out, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "讲个故事",
+		Duration: 10, Style: "温馨治愈",
+	})
+	require.NoError(t, err)
+	assert.True(t, sel.called)
+	assert.NotZero(t, out.ID)
+}

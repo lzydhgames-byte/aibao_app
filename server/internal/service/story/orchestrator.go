@@ -31,19 +31,26 @@ type Budget interface {
 	Record(ctx context.Context, inputTokens, outputTokens int) error
 }
 
+// MemorySelector returns a short prompt-injectable memory context.
+// Plan 6: fail-open — returns "" on any error/no-recall.
+type MemorySelector interface {
+	BuildContext(ctx context.Context, childID int64) string
+}
+
 // Deps groups Orchestrator dependencies.
 type Deps struct {
-	Stories       StoryRepo
-	Children      ChildRepo
-	LLM           llm.Client
-	Budget        Budget
-	PreCheck      *safety.PreChecker
-	PostCheck     *safety.PostChecker
-	PromptTmpl    string
-	FallbackDir   string
-	StoryModel    string
-	Temperature   float64
-	PromptVersion string
+	Stories        StoryRepo
+	Children       ChildRepo
+	LLM            llm.Client
+	Budget         Budget
+	PreCheck       *safety.PreChecker
+	PostCheck      *safety.PostChecker
+	MemorySelector MemorySelector // Plan 6
+	PromptTmpl     string
+	FallbackDir    string
+	StoryModel     string
+	Temperature    float64
+	PromptVersion  string
 }
 
 // Orchestrator runs the PreCheck → PromptBuild → LLM → PostCheck → Persist
@@ -103,6 +110,12 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		return nil, mapSafetyReject(preOut.RejectReason, preOut.MatchedRule)
 	}
 
+	memCtx := ""
+	if o.d.MemorySelector != nil {
+		memCtx = o.d.MemorySelector.BuildContext(ctx, child.ID)
+		lg.Debug("orchestrator.memory_context", "child_id", child.ID, "len", len(memCtx))
+	}
+
 	po := o.builder.Build(prompt.BuildInput{
 		ChildNickname:            child.Nickname,
 		ChildAgeYears:            ageYearsFromBirthday(child.Birthday),
@@ -114,6 +127,7 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		UserPromptCleaned:        preOut.NormalizedPrompt,
 		NormalizedIPs:            preOut.NormalizedIPs,
 		NormalizedIPInstructions: preOut.IPInstructions,
+		MemorySummary:            memCtx,
 		PromptVersion:            o.d.PromptVersion,
 	})
 
