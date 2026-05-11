@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -111,9 +112,29 @@ func TestBuilder_MemorySummaryRenders(t *testing.T) {
 		MemorySummary: "上次救过一只小恐龙阿绿。",
 		PromptVersion: "v1",
 	})
-	assert.Contains(t, out.SystemPrompt, "最近的故事记忆")
+	assert.Contains(t, out.SystemPrompt, "故事记忆上下文")
 	assert.Contains(t, out.SystemPrompt, "阿绿")
 	assert.NotContains(t, out.SystemPrompt, "首次相遇")
+}
+
+func TestBuilder_MemorySectionPosition(t *testing.T) {
+	b, err := NewBuilder(templatePath)
+	require.NoError(t, err)
+	out := b.Build(BuildInput{
+		ChildNickname: "小宇",
+		ChildAgeYears: 5,
+		ChildGender:   "boy",
+		Duration:      10,
+		Style:         "温馨治愈",
+		MemorySummary: "测试摘要",
+		PromptVersion: "v1",
+	})
+	memIdx := strings.Index(out.SystemPrompt, "【故事记忆上下文】")
+	consIdx := strings.Index(out.SystemPrompt, "【不可违反的 8 条强约束】")
+	assert.GreaterOrEqual(t, memIdx, 0, "memory section should appear")
+	assert.GreaterOrEqual(t, consIdx, 0, "constraints section should appear")
+	assert.Less(t, memIdx, consIdx, "memory section should precede 8 constraints")
+	assert.Contains(t, out.SystemPrompt, "尝试借用以下记忆里的角色或场景")
 }
 
 func TestBuilder_EmptyMemoryGoesElseBranch(t *testing.T) {
