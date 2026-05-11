@@ -74,6 +74,31 @@ JWT 签名算法的两大家族：
 **为什么需要 nonce**：如果固定 nonce，加密 100 个相同手机号会得 100 个相同密文——攻击者一眼看出哪些用户手机号一样。Nonce 保证密文随机化。  
 项目体现：`phonecrypt.Cipher` 用 AES-256-GCM；每次 Encrypt 生成 12 字节随机 nonce 拼在密文前面，Decrypt 时取出 nonce 还原。
 
+## 10.11 云服务标识符的"完整名 vs 短名"陷阱
+
+很多云服务（Tencent COS / AWS S3 + 账户后缀 / 阿里 OSS）的 bucket / 资源在控制台显示成"完整名"（含账号 ID 后缀），但 SDK 期望传入"短名" + 单独的 AppID / AccountID 字段，**SDK 内部自动拼接**。运维者很容易把完整名当 bucket 名传入 → SDK 又拼一次 → 得到 `<short>-<appid>-<appid>` 一个根本不存在的资源 → 404 NoSuchBucket。
+
+**项目体现**（Plan 5）：腾讯云 COS 控制台显示 `aibao-audio-1234567890`，用户把这个完整名贴进 `COS_BUCKET` 配置。但 cos-go-sdk-v5 期望传入短名 `aibao-audio` + AppID `1234567890`——SDK 内部拼成 `aibao-audio-1234567890`。结果配置传入完整名后，代码访问的是 `aibao-audio-1234567890-1234567890`，404。
+
+**生产代码必须双向容错**——检测传入是否已含后缀：
+```go
+if !strings.HasSuffix(cfg.Bucket, "-"+cfg.AppID) {
+    cfg.Bucket = cfg.Bucket + "-" + cfg.AppID
+}
+```
+不管运维填"短名"还是"完整名"，代码都能识别。见 `internal/gateway/storage/cos.go`（commit 2f8f0f3）。
+
+**为什么需要这条**：这是云厂商 API 设计的常见缺陷——同一个标识符有两种合法形态，**文档+控制台用一种、SDK 用另一种**。运维者按"我从控制台拷贝的就是 bucket 名"的直觉操作必踩。代码不做容错就只能等线上炸。
+
+**类比**：手机号"+86 区号"陷阱——有人输 `13900000000` 有人输 `+8613900000000`，系统得能识别两种形态再统一。或者：邮编"五位 vs 九位"——美国 zip 可以 `94103` 也可以 `94103-1234`，软件得双向兼容。
+
+**同样的陷阱出现在**：
+- AWS S3：`<bucket>` vs `<bucket>.s3.amazonaws.com` vs `arn:aws:s3:::<bucket>`
+- 阿里 OSS：`bucket` + `endpoint` 分离，控制台显示却是 `bucket.endpoint` 合一
+- 任何"resource ID + tenant ID"分离的云服务
+
+排查口诀：**API 返回 NotFound 时，第一个怀疑的不是权限，是你传的 ID 形态对不对**。
+
 ## 即将引入
 
 - **双层安全链路**（前置 PreCheck + 后置 PostCheck，技术架构第 7 章）

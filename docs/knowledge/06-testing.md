@@ -128,3 +128,26 @@ Git Bash 默认 locale 是 **GBK / CP936**。当用 `curl -d '{"prompt":"中文"
 **为什么需要这条**：定位这个 bug 浪费了一小时——因为 server 端代码看着像有 bug（"红线词库不全？"），实际是 client 编码错。生产环境完全不会出现：Flutter / iOS HTTP 库永远 UTF-8 序列化 JSON，与 client locale 无关。但本地 smoke 测试是真会踩。
 
 **类比**：寄国际快递时收件人地址写成中文又不贴翻译标签——快递员（服务端）不认得，包裹送不到。问题不在快递公司，在你寄之前没用对编码。
+
+## 6.12 基础设施连通性预测试（infra smoke before code smoke）
+
+接入新的外部依赖（云存储、第三方 API、第三方 SDK）时，**在写应用代码前**先用一次性脚本独立验证：云凭证、bucket / API 端点、网络连通。脚本特点：
+- **脱离项目代码**——单独的 `smoke-xxx/main.go` 或 `.sh`，不 import 任何业务模块
+- **裸 SDK 调用**——直接 `cos.NewClient(...)` → `client.Object.Put(...)`，不走 service / repo
+- **最小可行操作**——能上传一个 1KB 文件 / 能 TTS 一句"你好"就够了
+
+**项目体现**（Plan 5）：接 COS 和 Minimax 时分别先跑：
+```
+smoke-cos/main.go   —— 上传 hello.txt → 拿签名 URL → 下载验证
+smoke-tts/main.go   —— 调 t2a_v2 合成"你好爱宝" → 写本地 mp3 播放
+```
+**提前发现的问题**：
+1. COS region 配错（北京 / 广州 endpoint 不一致）
+2. 子账号未绑 COS:PutObject 策略
+3. **bucket 双 APPID 陷阱**（见知识库 10.11）—— 如果在应用层 smoke 发现，错误信息会被业务包装成"audio_status=failed"，根本看不到 `NoSuchBucket` 原始报错
+
+**为什么需要这条**：应用层 smoke 失败时，错误信息往往**层层包装**——"故事生成失败" → "outbox tts_synthesis 失败" → "COS upload error" → 最里面才是 `NoSuchBucket`。如果先做过 infra smoke 确认裸 SDK 能通，应用 smoke 失败时**根本不需要怀疑基础设施**——直接看业务代码即可。定位时间至少差 3×。
+
+**类比**：装修前先**单独**测试水电——通水通电了再做防水做地板。如果直接铺地板再发现水管漏水，要砸地板重做。基础设施 smoke 就是"先测水电"。
+
+**操作惯例**：smoke 脚本**不入仓**（写完即删，或加 `.gitignore` 规则）。知识库这里记录用法即可。Plan 5 提交时已通过 `.gitignore` 排除 `smoke-*` 目录（见 commit 9be2c0b）。

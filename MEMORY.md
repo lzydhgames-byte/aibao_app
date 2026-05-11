@@ -129,6 +129,14 @@
 - 覆盖率 90.9% / 81.2%；Matcher 11µs/op（远低于 1ms 验收）
 - 0 lint issues
 
+### Plan 5（2026-05-11 完成，17 Task）异步音频管线 + TTS Gateway + COS Storage
+- TTS Gateway 抽象（Minimax REST t2a_v2 + Mock）
+- Storage Gateway 抽象（Tencent COS + Mock；私有 bucket + 15 分钟签名 URL）
+- 异步音频管线（Orchestrator 同事务写 `tts_synthesis` outbox 事件 → Worker handler → `audio_status: pending → ready/failed`）
+- `GET /api/v1/stories/:id/audio_url`（3 态分支：202 pending / 200 ready+url / 503 failed；所有权校验）
+- 端到端真链路冒烟通过：POST 16.3s（audio_status=pending）→ T+6s ready → 880KB / 54s mp3
+- 业务 metrics 真埋上：tts_call_duration_seconds / storage_upload_duration_seconds / audio_ready_total
+
 ### Plan 4（2026-05-09 完成，22 Task）故事生成 + LLM Gateway + Outbox Worker
 - LLM Gateway 抽象（Doubao OpenAI 兼容 + Mock + BudgetGate 预算熔断）
 - Story Orchestrator（PreCheck → Prompt → LLM → PostCheck → Fallback → Persist 同事务）
@@ -160,6 +168,7 @@
 - **2026-05-07** — 完成 Plan 3 实现规划（双层安全 + Prompt 模板，待执行）
 - **2026-05-08** — Plan 3 全部 12 Task 完成，CLI demo 通过；覆盖率 90.9%/81.2%
 - **2026-05-09** — Plan 4 完成：LLM Gateway + Story Orchestrator + Outbox Worker 全栈实现，端到端真豆包生成验证通过
+- **2026-05-11** — Plan 5 完成：TTS (Minimax) + 异步音频管线 + COS 存储，端到端 6 秒出音频（POST 文本立即返回，后台 TTS+上传 ~6s 完成）
 
 ## 关键技术教训（来自实施过程）
 
@@ -173,3 +182,6 @@
 - **Git Bash on Windows 中文编码污染**：Git Bash 默认 GBK locale 把命令行参数中的 UTF-8 字符串重编码为 GBK 字节再 POST。Smoke 测试中文 prompt 必须用 PowerShell + `[System.Text.Encoding]::UTF8.GetBytes()` 显式发 UTF-8。生产 Flutter 客户端不受影响（HTTP 库永远 UTF-8 序列化）。已记录到知识库 6.10。
 - **fail-open vs fail-closed 取舍**：意图分类 LLM 失败时 fail-open 到 safe（不拦用户），红线词匹配 fail-closed 必须拦。原则：影响用户体验的非关键检查 fail-open，安全硬要求 fail-closed。已记录到知识库 11.9 / 10-security-and-compliance.md。
 - **viper Bind Env 自动映射规则**：配置字段路径 `a.b.c` 自动绑定到 env `AIBAO_A_B_C`。Plan 4 中 `llm.api_key` 自动绑到 `AIBAO_LLM_API_KEY`，但用户习惯用 `AIBAO_LLM_DOUBAO_API_KEY` → 在 main.go 加 fallback shim 把后者拷贝到前者。
+- **COS Bucket 命名陷阱**（Plan 5）：腾讯云 COS 控制台显示完整名 `<short>-<appid>`，但 cos-go-sdk-v5 期望传入**短名**——SDK 内部自动拼 `-<appid>`。运维者很容易把完整名贴进配置 → SDK 又拼一次 → 404 NoSuchBucket。生产代码必须容错"完整名/短名"二义性输入：`if !strings.HasSuffix(Bucket, "-"+AppID) { Bucket = Bucket + "-" + AppID }`。同类陷阱出现在 S3、阿里 OSS。已记录知识库 10。
+- **异步音频路径的体验价值**（Plan 5）：实测 TTS + COS 上传仅 ~6 秒——比 LLM 文本生成 16 秒还短。即便如此，**走异步**让用户在 16s 拿到文本立即可读，比同步路径等满 22s 体验好得多。感知延迟 = 总延迟 × 用户专注度——把"不必专注等待"的工作甩到后台是 UX 设计的核心手段。已记录知识库 5.15。
+- **smoke 前先做基础设施连通性预测试**（Plan 5）：Plan 4 教训沉淀，Plan 5 接 COS 和 Minimax 时分别先用一次性 `smoke-cos/main.go` / `smoke-tts/main.go`（脱离项目代码、裸 SDK 调用）验证凭证 + bucket + voice_id，提前发现 region 不匹配 + 子账号策略未绑 + bucket 双拼问题。这类问题在应用层 smoke 才暴露会被业务逻辑包装错误信息淹没，定位至少 ×3 时间。已记录知识库 6.12。

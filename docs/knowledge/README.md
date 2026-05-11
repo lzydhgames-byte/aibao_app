@@ -20,12 +20,12 @@
 | [02-go-language.md](02-go-language.md) | module path、`internal/`、context、struct tag、错误包装、iota、errors.Is/As、Mutex、regex、指针 PATCH |
 | [03-go-engineering.md](03-go-engineering.md) | Go 项目结构、三层架构、Makefile、go.mod / go.sum、go install / -tags、viper env 自动绑定 |
 | [04-docker.md](04-docker.md) | Docker、容器 vs 虚拟机、docker-compose、绑定 127.0.0.1 |
-| [05-software-design.md](05-software-design.md) | 关注点分离、依赖倒置 (DIP)、YAGNI、Outbox Pattern、12-Factor App、Pets vs Cattle、AppError 模式、重试退避、死信队列 DLQ |
-| [06-testing.md](06-testing.md) | TDD 循环、单元/集成/E2E、`t.TempDir`、`t.Setenv`、testify、表驱动、testcontainers、mock/fake/stub、Eventually 模式、Git Bash 中文编码 |
+| [05-software-design.md](05-software-design.md) | 关注点分离、依赖倒置 (DIP)、YAGNI、Outbox Pattern、12-Factor App、Pets vs Cattle、AppError 模式、重试退避、死信队列 DLQ、异步降低感知延迟 |
+| [06-testing.md](06-testing.md) | TDD 循环、单元/集成/E2E、`t.TempDir`、`t.Setenv`、testify、表驱动、testcontainers、mock/fake/stub、Eventually 模式、Git Bash 中文编码、基础设施连通性预测试 |
 | [07-http-and-web.md](07-http-and-web.md) | 中间件、洋葱模型、Gin、状态码全集、Bearer 认证、CRUD（PATCH vs PUT）、限流算法对比 |
 | [08-database.md](08-database.md) | PG/ORM/连接池、migration（含 golang-migrate 实操）、GORM、Redis 数据结构、TTL/LRU、SETNX/GETDEL |
 | [09-observability.md](09-observability.md) | 结构化日志、TraceID、lumberjack、Prometheus 三类指标、SLO |
-| [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce |
+| [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce、云服务标识符完整名 vs 短名陷阱 |
 | [11-llm-engineering.md](11-llm-engineering.md) | Token、System/User Prompt、Temperature、流式 vs 整体、Fallback、上下文窗口、前缀缓存、火山引擎 Endpoint ID、fail-open vs fail-closed |
 
 ---
