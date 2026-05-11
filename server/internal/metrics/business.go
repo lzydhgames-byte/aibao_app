@@ -22,6 +22,11 @@ type Business struct {
 	AudioPendingCount     prometheus.Gauge
 	AudioReadyTotal       prometheus.Counter
 	AudioFailedTotal      *prometheus.CounterVec // labels: stage (tts/storage/db)
+
+	// Plan 6
+	MemorySummaryDuration    prometheus.Histogram
+	MemorySummaryTotal       *prometheus.CounterVec // labels: status (ok|fail)
+	BootstrapCompletionTotal prometheus.Counter
 }
 
 // NewBusiness registers all business metrics on reg and returns the bundle.
@@ -121,6 +126,25 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 				Help: "Stories that ended in audio_status='failed', labeled by failing stage.",
 			}, []string{"stage"},
 		),
+		MemorySummaryDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "memory_summary_duration_seconds",
+				Help:    "Latency of the cheap LLM call that summarizes a finished story into a one-sentence memory.",
+				Buckets: prometheus.ExponentialBuckets(0.1, 2, 8),
+			},
+		),
+		MemorySummaryTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "memory_summary_total",
+				Help: "Count of memory-summary LLM calls.",
+			}, []string{"status"},
+		),
+		BootstrapCompletionTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "bootstrap_completion_total",
+				Help: "Count of successful BOOTSTRAP answer submissions.",
+			},
+		),
 	}
 	reg.MustRegister(
 		b.StoryGenerateTotal,
@@ -138,6 +162,9 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 		b.AudioPendingCount,
 		b.AudioReadyTotal,
 		b.AudioFailedTotal,
+		b.MemorySummaryDuration,
+		b.MemorySummaryTotal,
+		b.BootstrapCompletionTotal,
 	)
 	return b
 }

@@ -29,6 +29,10 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 	bm.AudioPendingCount.Set(2)
 	bm.AudioReadyTotal.Inc()
 	bm.AudioFailedTotal.WithLabelValues("tts").Inc()
+	bm.MemorySummaryDuration.Observe(0.5)
+	bm.MemorySummaryTotal.WithLabelValues("ok").Inc()
+	bm.MemorySummaryTotal.WithLabelValues("fail").Inc()
+	bm.BootstrapCompletionTotal.Inc()
 
 	mf, err := reg.Gather()
 	require.NoError(t, err)
@@ -53,6 +57,9 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 		"audio_pending_count",
 		"audio_ready_total",
 		"audio_failed_total",
+		"memory_summary_duration_seconds",
+		"memory_summary_total",
+		"bootstrap_completion_total",
 	} {
 		assert.Contains(t, joined, want, "missing metric %s", want)
 	}
