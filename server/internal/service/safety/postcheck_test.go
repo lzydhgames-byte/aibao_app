@@ -62,6 +62,52 @@ func TestPostCheck_RejectChildAbsent(t *testing.T) {
 	assert.Equal(t, "child_not_protagonist", out.RejectReason)
 }
 
+func TestPostCheck_DurationAdaptive_5min_2Mentions(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门。小宇决定勇敢地走进竹林。爱宝跟着。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+		Duration:      5,
+	})
+	assert.True(t, out.Pass)
+}
+
+func TestPostCheck_DurationAdaptive_5min_1Mention(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门，决定勇敢地走进竹林。爱宝跟着。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+		Duration:      5,
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "child_not_protagonist", out.RejectReason)
+}
+
+func TestPostCheck_DurationAdaptive_15min_3Mentions(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门。小宇走进竹林。小宇笑了。爱宝跟着。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+		Duration:      15,
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "child_not_protagonist", out.RejectReason)
+}
+
+func TestPostCheck_DurationAdaptive_15min_4Mentions(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门。小宇走进竹林。小宇笑了。小宇又跑了。爱宝跟着。"
+	out := pc.Check(PostCheckInput{
+		StoryText:     story,
+		ChildNickname: "小宇",
+		Duration:      15,
+	})
+	assert.True(t, out.Pass)
+}
+
 func TestPostCheck_RejectChildPassive(t *testing.T) {
 	pc := newTestPostChecker(t)
 	story := strings.Repeat("爱宝跑了。爱宝跳了。爱宝笑了。", 10) + "小宇也在场。"

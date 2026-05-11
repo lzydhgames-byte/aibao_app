@@ -159,6 +159,7 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 			StoryText:     llmText,
 			ChildNickname: child.Nickname,
 			ChildFearList: fearList,
+			Duration:      p.Duration,
 		})
 		if !postOut.Pass {
 			lg.Warn("story.postcheck.fail", "reason", postOut.RejectReason, "rule", postOut.MatchedRule)
