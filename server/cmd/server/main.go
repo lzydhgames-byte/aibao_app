@@ -313,7 +313,7 @@ func run() error {
 			BackoffBase:  time.Duration(cfg.Worker.BackoffBaseSeconds) * time.Second,
 			BackoffMax:   time.Duration(cfg.Worker.BackoffMaxSeconds) * time.Second,
 		})
-		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo))
+		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo, nil, nil))
 		w.Register(model.EventTypeTTSSynthesis, handlers.NewTTSSynthesisHandler(
 			storyRepo, storyRepo,
 			ttsClient, storageClient,

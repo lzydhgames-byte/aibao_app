@@ -10,17 +10,32 @@ import (
 	"github.com/aibao/server/internal/repository"
 )
 
+// Summarizer is the minimal interface MemoryUpdateHandler needs from
+// service/memory.Summarizer. Kept as an interface so tests can stub it
+// without spinning up an LLM client.
+type Summarizer interface {
+	Summarize(ctx context.Context, storyText string) string
+}
+
 // MemoryUpdateHandler writes a memory record summarizing the just-finished
 // story. Idempotent via INSERT (duplicate handler runs leave a tiny extra
 // row, harmless and rare). For stricter idempotency, a unique index on
 // (child_id, story_id) could be added later.
+//
+// Plan 6: in addition to the canonical orchestrator-emitted row, this
+// handler optionally writes a second row whose payload.summary is the
+// LLM-produced one-sentence (~30 char) version, suitable for cheap
+// prompt-context injection on the next story.
 type MemoryUpdateHandler struct {
-	memories repository.MemoryRepo
+	memories   repository.MemoryRepo
+	stories    StoryReader
+	summarizer Summarizer
 }
 
-// NewMemoryUpdateHandler constructs a handler.
-func NewMemoryUpdateHandler(m repository.MemoryRepo) *MemoryUpdateHandler {
-	return &MemoryUpdateHandler{memories: m}
+// NewMemoryUpdateHandler constructs a handler. stories and summarizer may
+// be nil; in that case the Plan 6 LLM-summary path is skipped.
+func NewMemoryUpdateHandler(m repository.MemoryRepo, s StoryReader, sum Summarizer) *MemoryUpdateHandler {
+	return &MemoryUpdateHandler{memories: m, stories: s, summarizer: sum}
 }
 
 // memoryUpdatePayload mirrors the orchestrator's emit shape.
@@ -32,7 +47,8 @@ type memoryUpdatePayload struct {
 	UsedFallback bool   `json:"used_fallback"`
 }
 
-// Handle parses payload and writes a memories row.
+// Handle parses payload and writes a memories row. Plan 6: also enqueues
+// an LLM-derived summary row (fail-open — never returns the secondary error).
 func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) error {
 	var p memoryUpdatePayload
 	if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -42,10 +58,42 @@ func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	if err != nil {
 		return fmt.Errorf("re-encode payload: %w", err)
 	}
-	return h.memories.Create(ctx, &model.Memory{
+	storyIDPtr := p.StoryID
+	if err := h.memories.Create(ctx, &model.Memory{
 		ChildID:    p.ChildID,
-		MemoryType: "story_summary",
+		MemoryType: model.MemoryTypeStorySummary,
 		Payload:    innerJSON,
 		Weight:     1.0,
+		StoryID:    &storyIDPtr,
+	}); err != nil {
+		return err
+	}
+
+	// Plan 6: LLM-summarize fresh story text into a second, shorter memory.
+	if h.summarizer == nil || h.stories == nil {
+		return nil
+	}
+	story, err := h.stories.FindByID(ctx, p.StoryID)
+	if err != nil || story == nil {
+		return nil
+	}
+	summary := h.summarizer.Summarize(ctx, story.TextContent)
+	if summary == "" {
+		return nil
+	}
+	sumPayload, _ := json.Marshal(map[string]interface{}{
+		"type":          "story_summary",
+		"summary":       summary,
+		"story_id":      p.StoryID,
+		"title":         p.Title,
+		"used_fallback": p.UsedFallback,
 	})
+	_ = h.memories.Create(ctx, &model.Memory{
+		ChildID:    p.ChildID,
+		MemoryType: model.MemoryTypeStorySummary,
+		Payload:    sumPayload,
+		Weight:     1.2,
+		StoryID:    &storyIDPtr,
+	})
+	return nil
 }
