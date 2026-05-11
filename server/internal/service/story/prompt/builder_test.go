@@ -113,6 +113,23 @@ func TestBuilder_MemorySummaryRenders(t *testing.T) {
 	})
 	assert.Contains(t, out.SystemPrompt, "最近的故事记忆")
 	assert.Contains(t, out.SystemPrompt, "阿绿")
+	assert.NotContains(t, out.SystemPrompt, "首次相遇")
+}
+
+func TestBuilder_EmptyMemoryGoesElseBranch(t *testing.T) {
+	b, err := NewBuilder(templatePath)
+	require.NoError(t, err)
+	out := b.Build(BuildInput{
+		ChildNickname: "小宇",
+		ChildAgeYears: 5,
+		ChildGender:   "boy",
+		Duration:      10,
+		Style:         "温馨治愈",
+		MemorySummary: "",
+		PromptVersion: "v1",
+	})
+	assert.Contains(t, out.SystemPrompt, "首次相遇")
+	assert.NotContains(t, out.SystemPrompt, "最近的故事记忆")
 }
 
 func TestBuilder_NoTopicShowsAsPure(t *testing.T) {
