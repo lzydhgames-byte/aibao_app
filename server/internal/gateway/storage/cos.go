@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/tencentyun/cos-go-sdk-v5"
@@ -38,8 +39,11 @@ func NewCOS(cfg COSConfig) (*COSClient, error) {
 	if cfg.UploadTimeout == 0 {
 		cfg.UploadTimeout = 30 * time.Second
 	}
+	// Tencent COS requires bucket host to be "<short_name>-<appid>". Operators
+	// commonly set BUCKET to the full name (already includes APPID) — detect
+	// this and skip the suffix so we don't end up with bucket-appid-appid.
 	bucketHost := cfg.Bucket
-	if cfg.AppID != "" {
+	if cfg.AppID != "" && !strings.HasSuffix(cfg.Bucket, "-"+cfg.AppID) {
 		bucketHost = fmt.Sprintf("%s-%s", cfg.Bucket, cfg.AppID)
 	}
 	bucketURL := &url.URL{

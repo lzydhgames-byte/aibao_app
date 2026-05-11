@@ -32,6 +32,21 @@ func TestCOS_PresignURL(t *testing.T) {
 	assert.True(t, exp.After(time.Now()))
 }
 
+// TestCOS_BucketAlreadyHasAppIDSuffix guards against the "bucket-appid-appid"
+// trap: operators commonly set BUCKET to the full COS name (which already
+// ends in -<APPID>). The constructor must not double-suffix.
+func TestCOS_BucketAlreadyHasAppIDSuffix(t *testing.T) {
+	c, err := NewCOS(COSConfig{
+		Bucket: "aibao-test-1234567890", Region: "ap-shanghai",
+		AppID: "1234567890", SecretID: "AKID...", SecretKey: "secret",
+	})
+	require.NoError(t, err)
+	u, _, err := c.GetPresignedURL(context.Background(), "audio/k.mp3", time.Minute)
+	require.NoError(t, err)
+	assert.Contains(t, u, "aibao-test-1234567890.cos.ap-shanghai.myqcloud.com")
+	assert.NotContains(t, u, "1234567890-1234567890")
+}
+
 // Upload/HeadObject/Delete integration with a stub server is skipped:
 // cos-go-sdk-v5 strictly verifies the request Host matches BucketURL, so a
 // plain httptest stub causes signing-vs-host mismatches. Real provider smoke
