@@ -50,11 +50,19 @@ type Memory struct {
 	MemoryType string    `gorm:"column:memory_type"`
 	Payload    []byte    `gorm:"column:payload;type:jsonb"`
 	Weight     float64   `gorm:"column:weight"`
+	StoryID    *int64    `gorm:"column:story_id" json:"story_id,omitempty"` // Plan 6: nullable FK
 	CreatedAt  time.Time `gorm:"column:created_at"`
 }
 
 // TableName returns the SQL table name.
 func (Memory) TableName() string { return "memories" }
+
+// Memory type constants.
+const (
+	MemoryTypeStorySummary = "story_summary"
+	MemoryTypeInterest     = "interest"
+	MemoryTypePreference   = "preference"
+)
 
 // OutboxEvent maps to outbox_events.
 type OutboxEvent struct {
