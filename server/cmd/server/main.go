@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -35,6 +36,7 @@ import (
 	authsvc "github.com/aibao/server/internal/service/auth"
 	"github.com/aibao/server/internal/service/bootstrap"
 	childsvc "github.com/aibao/server/internal/service/child"
+	"github.com/aibao/server/internal/service/audio"
 	memorysvc "github.com/aibao/server/internal/service/memory"
 	"github.com/aibao/server/internal/service/safety"
 	storysvc "github.com/aibao/server/internal/service/story"
@@ -323,9 +325,25 @@ func run() error {
 			BackoffMax:   time.Duration(cfg.Worker.BackoffMaxSeconds) * time.Second,
 		})
 		w.Register(model.EventTypeMemoryUpdate, handlers.NewMemoryUpdateHandler(memoryRepo, storyRepo, memorySummarizer))
+		// Plan 7: audio orchestrator (TTS + BGM mixing) wiring.
+		if _, lookErr := exec.LookPath(cfg.Audio.FFmpegPath); lookErr != nil {
+			lg.Warn("ffmpeg.lookup.miss; stories will degrade to TTS-only",
+				"configured_path", cfg.Audio.FFmpegPath, "err", lookErr.Error())
+		}
+		bgmRepo := repository.NewBGMRepo(db)
+		bgmCache := audio.NewBGMCache(storageClient, cfg.Audio.BGMCacheDir)
+		ffmpegMixer := audio.NewFFmpegMixer(
+			cfg.Audio.FFmpegPath,
+			cfg.Audio.BGMVolumeDB,
+			cfg.Audio.OutputSampleRate,
+			cfg.Audio.OutputBitrateKbps,
+			time.Duration(cfg.Audio.MixTimeoutSeconds)*time.Second,
+		)
+		audioOrch := audio.NewOrchestrator(ttsClient, bgmRepo, bgmCache, ffmpegMixer, bm)
+
 		w.Register(model.EventTypeTTSSynthesis, handlers.NewTTSSynthesisHandler(
 			storyRepo, storyRepo,
-			ttsClient, storageClient,
+			audioOrch, storageClient,
 			handlers.TTSHandlerConfig{
 				Provider:   cfg.TTS.Provider,
 				Model:      cfg.TTS.Model,
