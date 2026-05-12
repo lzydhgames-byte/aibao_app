@@ -21,8 +21,8 @@ type StoryRepo interface {
 	FindByID(ctx context.Context, id int64) (*model.Story, error)
 
 	// MarkAudioReady atomically updates a story to audio_status='ready' and
-	// fills audio_object_key/format/size/duration.
-	MarkAudioReady(ctx context.Context, storyID int64, objectKey, format string, sizeBytes int64, durationSec int) error
+	// fills audio_object_key/format/size/duration/has_bgm.
+	MarkAudioReady(ctx context.Context, storyID int64, objectKey, format string, sizeBytes int64, durationSec int, hasBGM bool) error
 
 	// MarkAudioFailed sets audio_status='failed' and stamps audio_failed_at.
 	MarkAudioFailed(ctx context.Context, storyID int64, errMsg string) error
@@ -64,7 +64,7 @@ func (r *storyRepo) CreateWithOutbox(
 }
 
 func (r *storyRepo) MarkAudioReady(
-	ctx context.Context, storyID int64, objectKey, format string, sizeBytes int64, durationSec int,
+	ctx context.Context, storyID int64, objectKey, format string, sizeBytes int64, durationSec int, hasBGM bool,
 ) error {
 	return r.db.WithContext(ctx).
 		Model(&model.Story{}).
@@ -76,6 +76,7 @@ func (r *storyRepo) MarkAudioReady(
 			"audio_size_bytes":       sizeBytes,
 			"audio_duration_seconds": durationSec,
 			"audio_failed_at":        nil,
+			"has_bgm":                hasBGM,
 		}).Error
 }
 

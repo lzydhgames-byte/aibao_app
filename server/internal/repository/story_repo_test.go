@@ -105,7 +105,7 @@ func TestStoryRepo_MarkAudioReady(t *testing.T) {
 	}}))
 
 	require.NoError(t, srepo.MarkAudioReady(context.Background(), story.ID,
-		"audio/1/42-x.mp3", "mp3", 12345, 600))
+		"audio/1/42-x.mp3", "mp3", 12345, 600, true))
 
 	got, err := srepo.FindByID(context.Background(), story.ID)
 	require.NoError(t, err)
@@ -113,6 +113,7 @@ func TestStoryRepo_MarkAudioReady(t *testing.T) {
 	assert.Equal(t, "audio/1/42-x.mp3", got.AudioObjectKey)
 	assert.Equal(t, int64(12345), got.AudioSizeBytes)
 	assert.Equal(t, 600, got.AudioDurationSeconds)
+	assert.True(t, got.HasBGM)
 }
 
 func TestStoryRepo_MarkAudioFailed(t *testing.T) {

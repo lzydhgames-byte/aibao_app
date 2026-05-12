@@ -14,6 +14,7 @@ import (
 	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/model"
 	"github.com/aibao/server/internal/pkg/logger"
+	"github.com/aibao/server/internal/service/audio"
 )
 
 // StoryReader is the minimal read surface this handler needs.
@@ -23,7 +24,7 @@ type StoryReader interface {
 
 // StoryAudioWriter is the minimal write surface this handler needs.
 type StoryAudioWriter interface {
-	MarkAudioReady(ctx context.Context, storyID int64, objectKey, format string, sizeBytes int64, durationSec int) error
+	MarkAudioReady(ctx context.Context, storyID int64, objectKey, format string, sizeBytes int64, durationSec int, hasBGM bool) error
 	MarkAudioFailed(ctx context.Context, storyID int64, errMsg string) error
 }
 
@@ -38,23 +39,28 @@ type TTSHandlerConfig struct {
 	Speed      float64
 }
 
-// TTSSynthesisHandler synthesizes audio for a story and uploads it to storage.
+// Composer is the minimal surface the handler needs from audio.Orchestrator.
+type Composer interface {
+	Compose(ctx context.Context, req audio.ComposeRequest) (*audio.ComposeResponse, error)
+}
+
+// TTSSynthesisHandler composes story audio (TTS + BGM) and uploads to storage.
 type TTSSynthesisHandler struct {
-	stories StoryReader
-	repo    StoryAudioWriter
-	tts     tts.Client
-	storage storage.Client
-	cfg     TTSHandlerConfig
-	bm      *metrics.Business
+	stories  StoryReader
+	repo     StoryAudioWriter
+	composer Composer
+	storage  storage.Client
+	cfg      TTSHandlerConfig
+	bm       *metrics.Business
 }
 
 // NewTTSSynthesisHandler constructs the handler.
 func NewTTSSynthesisHandler(
 	stories StoryReader, repo StoryAudioWriter,
-	t tts.Client, s storage.Client,
+	composer Composer, s storage.Client,
 	cfg TTSHandlerConfig, bm *metrics.Business,
 ) *TTSSynthesisHandler {
-	return &TTSSynthesisHandler{stories: stories, repo: repo, tts: t, storage: s, cfg: cfg, bm: bm}
+	return &TTSSynthesisHandler{stories: stories, repo: repo, composer: composer, storage: s, cfg: cfg, bm: bm}
 }
 
 type ttsSynthesisPayload struct {
@@ -89,15 +95,17 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 		return nil
 	}
 
-	tStart := time.Now()
-	resp, err := h.tts.Synthesize(ctx, tts.SynthesizeRequest{
-		Text: story.TextContent, VoiceID: h.cfg.VoiceID, Model: h.cfg.Model,
-		Format: h.cfg.Format, SampleRate: h.cfg.SampleRate, Bitrate: h.cfg.Bitrate,
-		Speed: h.cfg.Speed,
+	composed, err := h.composer.Compose(ctx, audio.ComposeRequest{
+		StoryID:   story.ID,
+		ChildID:   story.ChildID,
+		StoryText: story.TextContent,
+		Style:     story.Style,
+		Voice: tts.SynthesizeRequest{
+			VoiceID: h.cfg.VoiceID, Model: h.cfg.Model,
+			Format: h.cfg.Format, SampleRate: h.cfg.SampleRate,
+			Bitrate: h.cfg.Bitrate, Speed: h.cfg.Speed,
+		},
 	})
-	if h.bm != nil {
-		h.bm.TTSCallDuration.WithLabelValues(h.cfg.Provider).Observe(time.Since(tStart).Seconds())
-	}
 	if err != nil {
 		if h.bm != nil {
 			h.bm.TTSCallTotal.WithLabelValues(h.cfg.Provider, "fail").Inc()
@@ -106,17 +114,19 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 		if mErr := h.repo.MarkAudioFailed(ctx, storyID, err.Error()); mErr != nil {
 			lg.Error("tts.mark_failed_persist_err", "err", mErr.Error())
 		}
-		return fmt.Errorf("tts synthesize: %w", err)
+		return fmt.Errorf("audio compose: %w", err)
 	}
 	if h.bm != nil {
 		h.bm.TTSCallTotal.WithLabelValues(h.cfg.Provider, "ok").Inc()
 	}
-	lg.Info("tts.synthesize.ok", "story_id", storyID, "bytes", len(resp.Audio), "dur_sec", resp.DurationSeconds)
+	lg.Info("audio.compose.ok", "story_id", storyID,
+		"bytes", len(composed.AudioBytes), "dur_sec", composed.AudioDurationSec,
+		"has_bgm", composed.HasBGM, "mood", composed.Mood)
 
 	key := buildObjectKey(story.ChildID, story.ID, h.cfg.Format)
 	uStart := time.Now()
 	err = h.storage.Upload(ctx, storage.UploadInput{
-		Key: key, Body: bytes.NewReader(resp.Audio), Size: int64(len(resp.Audio)),
+		Key: key, Body: bytes.NewReader(composed.AudioBytes), Size: int64(len(composed.AudioBytes)),
 		ContentType: contentTypeFor(h.cfg.Format),
 	})
 	if h.bm != nil {
@@ -133,7 +143,8 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	}
 	lg.Info("storage.upload.ok", "story_id", storyID, "key", key)
 
-	if err := h.repo.MarkAudioReady(ctx, storyID, key, h.cfg.Format, int64(len(resp.Audio)), resp.DurationSeconds); err != nil {
+	if err := h.repo.MarkAudioReady(ctx, storyID, key, h.cfg.Format,
+		int64(len(composed.AudioBytes)), composed.AudioDurationSec, composed.HasBGM); err != nil {
 		if h.bm != nil {
 			h.bm.AudioFailedTotal.WithLabelValues("db").Inc()
 		}
