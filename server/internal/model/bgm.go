@@ -19,7 +19,7 @@ const (
 type BGMAsset struct {
 	ID          int64     `gorm:"column:id;primaryKey" json:"id"`
 	Mood        string    `gorm:"column:mood" json:"mood"`
-	Filename    string    `gorm:"column:filename" json:"filename"`
+	Filename    string    `gorm:"column:filename;uniqueIndex" json:"filename"`
 	ObjectKey   string    `gorm:"column:object_key" json:"object_key"`
 	DurationSec int       `gorm:"column:duration_sec" json:"duration_sec"`
 	License     string    `gorm:"column:license" json:"license"`

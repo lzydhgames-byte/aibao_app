@@ -19,5 +19,6 @@ func autoMigrateForTest(db *gorm.DB) error {
 		&model.StoryElement{},
 		&model.Memory{},
 		&model.OutboxEvent{},
+		&model.BGMAsset{},
 	)
 }
