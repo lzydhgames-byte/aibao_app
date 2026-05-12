@@ -34,6 +34,11 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 	bm.MemorySummaryTotal.WithLabelValues("fail").Inc()
 	bm.BootstrapCompletionTotal.Inc()
 	bm.LLMFailFallbackTotal.WithLabelValues("doubao", "doubao-lite", "upstream_error").Inc()
+	bm.AudioMixDuration.Observe(1.5)
+	bm.AudioMixTotal.WithLabelValues("ok").Inc()
+	bm.AudioMixTotal.WithLabelValues("degraded").Inc()
+	bm.AudioMixTotal.WithLabelValues("failed").Inc()
+	bm.BGMNotFoundTotal.WithLabelValues("warm").Inc()
 
 	mf, err := reg.Gather()
 	require.NoError(t, err)
@@ -62,6 +67,9 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 		"memory_summary_total",
 		"bootstrap_completion_total",
 		"llm_fail_fallback_total",
+		"audio_mix_duration_seconds",
+		"audio_mix_total",
+		"bgm_not_found_total",
 	} {
 		assert.Contains(t, joined, want, "missing metric %s", want)
 	}

@@ -30,6 +30,11 @@ type Business struct {
 
 	// Plan 6b
 	LLMFailFallbackTotal *prometheus.CounterVec // labels: provider, model, reason
+
+	// Plan 7
+	AudioMixDuration prometheus.Histogram     // no labels
+	AudioMixTotal    *prometheus.CounterVec   // labels: status (ok/degraded/failed)
+	BGMNotFoundTotal *prometheus.CounterVec   // labels: mood
 }
 
 // NewBusiness registers all business metrics on reg and returns the bundle.
@@ -154,6 +159,25 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 				Help: "Count of LLM call fail-open events (upstream error or unparseable), by provider/model/reason.",
 			}, []string{"provider", "model", "reason"},
 		),
+		AudioMixDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "audio_mix_duration_seconds",
+				Help:    "End-to-end audio mixing duration (TTS + BGM via ffmpeg).",
+				Buckets: prometheus.ExponentialBuckets(0.1, 2, 10), // 0.1s..~51s
+			},
+		),
+		AudioMixTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "audio_mix_total",
+				Help: "Count of audio mix attempts by status (ok/degraded/failed).",
+			}, []string{"status"},
+		),
+		BGMNotFoundTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "bgm_not_found_total",
+				Help: "Count of BGM lookups that returned no row for a mood.",
+			}, []string{"mood"},
+		),
 	}
 	reg.MustRegister(
 		b.StoryGenerateTotal,
@@ -175,6 +199,9 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 		b.MemorySummaryTotal,
 		b.BootstrapCompletionTotal,
 		b.LLMFailFallbackTotal,
+		b.AudioMixDuration,
+		b.AudioMixTotal,
+		b.BGMNotFoundTotal,
 	)
 	return b
 }
