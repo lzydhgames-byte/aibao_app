@@ -1,0 +1,55 @@
+# BGM manifest for seed-bgm CLI.
+# 10 first-party assets: 5 moods x 2 variants.
+# Update license / duration_sec when real audio is purchased/recorded,
+# then upload the mp3 files to COS at the matching object_key paths.
+bgm:
+  - mood: warm
+    filename: warm_01.mp3
+    object_key: bgm/warm/warm_01.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: warm
+    filename: warm_02.mp3
+    object_key: bgm/warm/warm_02.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: adventure
+    filename: adventure_01.mp3
+    object_key: bgm/adventure/adventure_01.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: adventure
+    filename: adventure_02.mp3
+    object_key: bgm/adventure/adventure_02.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: funny
+    filename: funny_01.mp3
+    object_key: bgm/funny/funny_01.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: funny
+    filename: funny_02.mp3
+    object_key: bgm/funny/funny_02.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: magic
+    filename: magic_01.mp3
+    object_key: bgm/magic/magic_01.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: magic
+    filename: magic_02.mp3
+    object_key: bgm/magic/magic_02.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: curious
+    filename: curious_01.mp3
+    object_key: bgm/curious/curious_01.mp3
+    duration_sec: 60
+    license: "TBD"
+  - mood: curious
+    filename: curious_02.mp3
+    object_key: bgm/curious/curious_02.mp3
+    duration_sec: 60
+    license: "TBD"
