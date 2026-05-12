@@ -48,6 +48,27 @@ func MoodFromStyle(style string) string {
 	}
 }
 
+// MoodFromCueZh maps the Chinese cue label to a mood key. Unlike MoodFromCueLabel,
+// it returns "" for unknown labels so callers can fall back to a different source
+// (e.g. story style). The audio cue parser uses this so a stray `[BGM情绪:暴风]`
+// does not silently become "warm".
+func MoodFromCueZh(label string) string {
+	switch strings.TrimSpace(label) {
+	case "温馨", "温馨治愈", "治愈":
+		return MoodWarm
+	case "冒险", "冒险探索", "探险":
+		return MoodAdventure
+	case "搞笑", "搞笑欢乐", "欢乐":
+		return MoodFunny
+	case "魔法", "神奇", "神奇魔法":
+		return MoodMagic
+	case "科普", "好奇", "认知", "科普认知":
+		return MoodCurious
+	default:
+		return ""
+	}
+}
+
 // MoodFromCueLabel maps the Chinese cue label emitted by LLM to mood key.
 // Unknown label falls back to MoodWarm.
 func MoodFromCueLabel(label string) string {
