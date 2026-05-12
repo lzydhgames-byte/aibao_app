@@ -38,4 +38,7 @@ type Client interface {
 	HeadObject(ctx context.Context, key string) (*ObjectMeta, error)
 	Delete(ctx context.Context, key string) error
 	GetPresignedURL(ctx context.Context, key string, ttl time.Duration) (string, time.Time, error)
+	// Download streams the object body. Caller MUST Close the returned reader.
+	// Returns ErrNotFound if the key does not exist.
+	Download(ctx context.Context, key string) (io.ReadCloser, error)
 }

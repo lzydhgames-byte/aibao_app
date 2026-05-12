@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -73,6 +74,23 @@ func (m *MockClient) GetPresignedURL(_ context.Context, key string, ttl time.Dur
 	}
 	exp := time.Now().Add(ttl)
 	return fmt.Sprintf("http://mock-storage.local/%s?expires=%d", key, exp.Unix()), exp, nil
+}
+
+// Download returns a ReadCloser over the stored bytes or ErrNotFound.
+func (m *MockClient) Download(_ context.Context, key string) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failNext {
+		m.failNext = false
+		return nil, ErrUpstream
+	}
+	b, ok := m.objects[key]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := make([]byte, len(b))
+	copy(cp, b)
+	return io.NopCloser(bytes.NewReader(cp)), nil
 }
 
 // Read is a test-only helper.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -104,6 +105,19 @@ func (s *COSClient) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
 	return nil
+}
+
+// Download streams the object body. Caller MUST Close the returned reader.
+func (s *COSClient) Download(ctx context.Context, key string) (io.ReadCloser, error) {
+	resp, err := s.c.Object.Get(ctx, key, nil)
+	if err != nil {
+		var cerr *cos.ErrorResponse
+		if errors.As(err, &cerr) && cerr.Response != nil && cerr.Response.StatusCode == http.StatusNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("%w: %v", ErrUpstream, err)
+	}
+	return resp.Body, nil
 }
 
 // GetPresignedURL returns a presigned GET URL valid for ttl.
