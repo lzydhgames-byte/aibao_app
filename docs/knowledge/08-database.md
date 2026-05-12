@@ -131,3 +131,34 @@ COMMIT;            -- 全部生效（或 ROLLBACK 全部撤销）
 **类比**：书的目录——找"第 5 章"直接翻 78 页，不用从第 1 页翻起。  
 **为什么不全列加索引**：索引占空间，写入时要维护。**读多写少的列**才加；写多读少（如日志表）通常只主键。  
 项目体现：`outbox_events(status, next_attempt_at)` 让 Worker 拉任务秒回；`stories(child_id, created_at DESC)` 查孩子近期故事秒回。
+
+
+## 8.11 GORM AutoMigrate vs 生产 migrate：schema 必须双向等价
+
+项目用 `golang-migrate` 跑 `.up.sql` 文件作为生产 schema 源；但集成测试用 `testcontainers + GORM AutoMigrate` 从 Go struct tag 反射建表。**两者必须保持等价**——否则测试通过的代码上生产可能就因 schema 差异而炸，或反过来生产正常而测试莫名报错。
+
+**真实案例**（Plan 7 Task 2 fix，commit `a2d5b25`）：`bgm_assets` 表生产 migration 写了 `filename VARCHAR(200) NOT NULL UNIQUE`，但 GORM struct tag 漏写 `uniqueIndex` → AutoMigrate 建出来的表没 UNIQUE 约束 → `Upsert` 的 `ON CONFLICT(filename)` 在测试里报"no matching constraint"，生产却 OK。**修法**：给 struct 加 `gorm:"uniqueIndex"` tag 让两边等价。
+
+**为什么需要**：测试环境 schema = 生产环境 schema 是"集成测试的可信度"基础。一旦两边发散：
+- 测试通过 ≠ 生产可行——隐藏的差异让 bug 漏到生产
+- 测试失败可能只是"测试环境的 schema 错"——开发会浪费时间调代码逻辑而真凶是 struct tag
+- 这种"信号污染"会逐步腐蚀对测试的信任——人会开始绕过测试
+
+**实施清单**（每加一张表都过一遍）：
+
+| schema 约束 | SQL migration | GORM struct tag |
+|---|---|---|
+| 主键 | `PRIMARY KEY` | `primaryKey` |
+| 外键 | `REFERENCES x(y)` | （通常 GORM 关系或手动加） |
+| UNIQUE 约束 | `UNIQUE` | `uniqueIndex` |
+| NOT NULL | `NOT NULL` | `not null`（gorm 默认 nullable！） |
+| 默认值 | `DEFAULT xxx` | `default:xxx` |
+| 复合索引 | `CREATE INDEX ... ON t(a,b)` | `index:idx_name,composite:xxx` |
+| 列名映射 | 列名 | `column:xxx` |
+
+**典型坑**：GORM 默认所有字段都是 nullable（即使 Go 里是非指针类型）——必须显式 `not null`。生产 SQL 没遗漏，但测试环境因 GORM 默认行为漏了约束。
+
+**项目体现**：Plan 7 Task 2 fix（subagent 在跑集成测试时自报，commit `a2d5b25`）。
+
+**类比**：合同——中文版和英文版必须逐条对应。漏一条约束就像"中文写了违约金 10 万但英文写 1 万"——签的时候没人察觉，出事时才发现两边对不上。
+

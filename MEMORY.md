@@ -180,6 +180,7 @@
 - **2026-05-11** — Plan 5 完成：TTS (Minimax) + 异步音频管线 + COS 存储，端到端 6 秒出音频（POST 文本立即返回，后台 TTS+上传 ~6s 完成）
 - **2026-05-12** — Plan 6 完成：BOOTSTRAP 首次相遇仪式 + 记忆深化（Summarizer + Selector）+ 彩蛋串联管线（含 2 个 latent bugfix：outbox payload 后改不生效 / intent_model endpoint 配错文生图模型）
 - **2026-05-13** — Plan 6b 完成：5 项 known-issue 修复 + 第一次真实证明彩蛋回调有效（Story 23 → Story 22 小精灵）
+- **2026-05-14** — Plan 7 完成：音频混音管线就位但 MVP 暂不启用 BGM；纯 TTS smoke 验证降级链路完整工作（`bgm_not_found → audio.mix.degraded → pure TTS`），未来收 BGM 上传 COS + `make seed-bgm` 零代码启用
 
 ## 关键技术教训（来自实施过程）
 
@@ -199,4 +200,5 @@
 - **outbox event 的 payload 不可后改**（Plan 6 暴露的 Plan 4 旧坑）：一旦 outbox row INSERT 进表，Go 内存里那个 `*OutboxEvent` 对象的修改不会同步到 DB。常见陷阱是事务里"先 INSERT 占位、后填补真值"——Orchestrator 在事务里写 outbox 时 story.ID 还没生成，事务后 patch payload.story_id 只改了内存。Handler 拉到的 payload 永远是占位值 0。**正确做法**：用 outbox row 的 `aggregate_id` 字段（CreateWithOutbox 内部填）承载这类"事务后才知道"的 id，或 handler 进来时再 query 一次最新 entity。Plan 4 埋下、Plan 5 tts_synthesis 已绕过、Plan 6 memory FK 才真正暴露。已记录知识库 5.16。
 - **fail-open 链路让 bug 推迟到下一个 plan 才显形**（Plan 6 暴露的 Plan 4 旧坑）：Plan 4 时 intent_model endpoint 绑成 Doubao-Seedream-5.0-lite（文生图模型，不接受 chat completion）——意图分类 LLM 全部 404，但 fail-open 兜底到 IntentSafe，**业务功能无感**。Plan 6 让 IntentModel 真干活（Bootstrap polish + Memory summary），bug 立刻浮出。**教训**：fail-open 链路必须配指标告警（`rate(*_fail_fallback_total) / rate(*_call_total) > 30% over 5min` 触发），否则 latent bug 累积到下游集中爆发。修复需要 Volcengine 控制台新建 endpoint。已记录知识库 9.14。
 - **软提示 prompt 工程的局限**（Plan 6 实测）：把"上次故事的 30 字总结"塞进 system prompt 尾部 + 写"可以自然回调"，LLM 仍倾向沿着 user prompt 自由发挥，对 memory context **几乎不响应**——Plan 6 smoke 海洋故事记忆 + 森林新主题 → 故事 3 完全没出现海洋元素。"软提示"哲学优雅但效果弱。后续要么把 memory 段抬到更高优先级位置、要么改用更明确"请尝试借用..."措辞、要么加一轮"故事编辑 LLM call"检查回调是否出现并 force regenerate。**先验证、后优化、再上线**是 prompt 工程的标准节奏。已记录知识库 11.10。
+- **基础设施先于内容**（Plan 7 设计选择）：Plan 7 选择把整条 BGM 管线（migration + repo + cache + mixer + orchestrator + CLI）写完上线，但**不收一首 BGM**。理由：基础设施编写 + 测试是确定性工作可外包给 subagent；BGM 素材筛选是人类品味判断的 1-2 小时事，把它压在 critical path 上是错配。**等用户反馈想要音乐时再花那 1-2 小时**——零代码工作启用，Plan 6b 投资的 `bgm_not_found_total` 指标今天就在 dashboard 提供"启用前后差多少"的可见信号。这条原则可推广：所有"内容驱动 + 代码驱动"双轨任务，**代码先行，内容后补**。已记录知识库（devlog 2026-05-14 教训第 3 条）。
 - **prompt 工程的措辞 + 位置联动**（Plan 6b 实测修正 Plan 6 结论）：Plan 6 时 memory 段在 system prompt 末尾 + 措辞"可以自然回调"，LLM 完全无视。Plan 6b 同时把段落移到 IDENTITY 之后 + 改成"请尝试借用以下记忆里的角色或场景"，Story 23 真回调了 Story 22 的小精灵——**单独改一项可能没效果，组合改才质变**。这条印证了知识库 11.10「软提示 vs 硬提示」的二元论过于简化，真实工程是"软提示 + 位置加权 + 措辞强度"的三维调节。已追加到知识库 11.10 末尾。
