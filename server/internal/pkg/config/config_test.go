@@ -293,6 +293,18 @@ storage:
 	assert.Equal(t, 900, cfg.Storage.PresignedTTLSec)
 }
 
+func TestLoad_AudioDefaults(t *testing.T) {
+	path := writeValidConfig(t)
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, "ffmpeg", cfg.Audio.FFmpegPath)
+	assert.Equal(t, "./cache/bgm", cfg.Audio.BGMCacheDir)
+	assert.InDelta(t, -18.0, cfg.Audio.BGMVolumeDB, 0.001)
+	assert.Equal(t, 30, cfg.Audio.MixTimeoutSeconds)
+	assert.Equal(t, 32000, cfg.Audio.OutputSampleRate)
+	assert.Equal(t, 128, cfg.Audio.OutputBitrateKbps)
+}
+
 func TestLoad_TTSMissingKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

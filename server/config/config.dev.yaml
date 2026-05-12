@@ -75,3 +75,11 @@ storage:
   # app_id:     from env AIBAO_STORAGE_COS_APPID
   # secret_id:  from env AIBAO_STORAGE_COS_SECRET_ID
   # secret_key: from env AIBAO_STORAGE_COS_SECRET_KEY
+
+audio:
+  ffmpeg_path: ffmpeg          # PATH lookup; set absolute path in prod if needed
+  bgm_cache_dir: ./cache/bgm
+  bgm_volume_db: -18
+  mix_timeout_seconds: 30
+  output_sample_rate: 32000
+  output_bitrate_kbps: 128

@@ -23,6 +23,17 @@ type Config struct {
 	Worker   WorkerConfig   `mapstructure:"worker"`
 	TTS      TTSConfig      `mapstructure:"tts"`
 	Storage  StorageConfig  `mapstructure:"storage"`
+	Audio    AudioConfig    `mapstructure:"audio"`
+}
+
+// AudioConfig holds ffmpeg + BGM mixing parameters.
+type AudioConfig struct {
+	FFmpegPath        string  `mapstructure:"ffmpeg_path"`         // default "ffmpeg" (PATH lookup)
+	BGMCacheDir       string  `mapstructure:"bgm_cache_dir"`       // default "./cache/bgm"
+	BGMVolumeDB       float64 `mapstructure:"bgm_volume_db"`       // default -18.0
+	MixTimeoutSeconds int     `mapstructure:"mix_timeout_seconds"` // default 30
+	OutputSampleRate  int     `mapstructure:"output_sample_rate"`  // default 32000
+	OutputBitrateKbps int     `mapstructure:"output_bitrate_kbps"` // default 128
 }
 
 // TTSConfig holds TTS provider parameters.
@@ -168,6 +179,8 @@ func Load(path string) (*Config, error) {
 		"storage.provider", "storage.bucket", "storage.region", "storage.app_id",
 		"storage.secret_id", "storage.secret_key",
 		"storage.presigned_ttl_seconds", "storage.upload_timeout_seconds",
+		"audio.ffmpeg_path", "audio.bgm_cache_dir", "audio.bgm_volume_db",
+		"audio.mix_timeout_seconds", "audio.output_sample_rate", "audio.output_bitrate_kbps",
 	} {
 		_ = v.BindEnv(key)
 	}
@@ -328,6 +341,25 @@ func applyDefaultsAndValidate(c *Config, path string) error {
 	}
 	if c.Storage.UploadTimeoutSec == 0 {
 		c.Storage.UploadTimeoutSec = 30
+	}
+
+	if c.Audio.FFmpegPath == "" {
+		c.Audio.FFmpegPath = "ffmpeg"
+	}
+	if c.Audio.BGMCacheDir == "" {
+		c.Audio.BGMCacheDir = "./cache/bgm"
+	}
+	if c.Audio.BGMVolumeDB == 0 {
+		c.Audio.BGMVolumeDB = -18.0
+	}
+	if c.Audio.MixTimeoutSeconds == 0 {
+		c.Audio.MixTimeoutSeconds = 30
+	}
+	if c.Audio.OutputSampleRate == 0 {
+		c.Audio.OutputSampleRate = 32000
+	}
+	if c.Audio.OutputBitrateKbps == 0 {
+		c.Audio.OutputBitrateKbps = 128
 	}
 	return nil
 }

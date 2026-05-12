@@ -87,3 +87,11 @@ storage:
   presigned_ttl_seconds: 900
   upload_timeout_seconds: 30
   # bucket / app_id / secret_id / secret_key: 生产必须通过 AIBAO_STORAGE_COS_* 环境变量注入，绝不能写入此文件
+
+audio:
+  ffmpeg_path: ffmpeg          # PATH lookup; prod 可改为绝对路径
+  bgm_cache_dir: ./cache/bgm
+  bgm_volume_db: -18           # BGM 相对人声衰减 dB
+  mix_timeout_seconds: 30
+  output_sample_rate: 32000
+  output_bitrate_kbps: 128
