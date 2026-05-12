@@ -1,4 +1,4 @@
-.PHONY: build run-dev test test-integration lint migrate-up migrate-down clean
+.PHONY: build run-dev test test-integration lint migrate-up migrate-down seed-bgm clean
 
 GO := go
 BINARY := bin/aibao-server
@@ -41,6 +41,11 @@ migrate-up:
 
 migrate-down:
 	migrate -path $(MIGRATE_DIR) -database "$(DB_URL_DEV)" down 1
+
+seed-bgm:
+	AIBAO_CONFIG=$(CONFIG_DEV) \
+	AIBAO_POSTGRES_PASSWORD=aibao \
+	$(GO) run ./cmd/seed-bgm -manifest=safety/bgm_manifest.yaml -config=$(CONFIG_DEV)
 
 clean:
 	rm -rf bin logs

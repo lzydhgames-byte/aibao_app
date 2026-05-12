@@ -9,6 +9,9 @@
 /logs/
 *.log
 
+# BGM local cache (Plan 7)
+/cache/
+
 # Smoke-test scratch files
 smoke-*.err
 smoke-*.json
