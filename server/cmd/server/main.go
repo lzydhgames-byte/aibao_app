@@ -255,6 +255,7 @@ func run() error {
 	storyRepo := repository.NewStoryRepo(db)
 	memoryRepo := repository.NewMemoryRepo(db)
 	outboxRepo := repository.NewOutboxRepo(db)
+	storylineRepo := repository.NewStorylineRepo(db)
 
 	rs, err := safety.LoadRules("safety/rules.yaml", "safety/ip_whitelist.yaml", "safety/ip_blacklist.yaml")
 	if err != nil {
@@ -270,19 +271,27 @@ func run() error {
 	bootstrapSvc := bootstrap.NewService(childService, llmClient, cfg.LLM.IntentModel, 0.5, bm, lg)
 	bootstrapHandler := api.NewBootstrapHandler(bootstrapSvc)
 
+	// Plan 8: storyline context builder + chapter-hook extractor for sequels.
+	chapterHook := storysvc.NewChapterHookExtractor(llmClient, cfg.LLM.IntentModel, 0.4, bm, lg)
+	storylineCtxBld := storysvc.NewStorylineContextBuilder(storylineRepo, storyRepo, memoryRepo, lg)
+
 	orch, err := storysvc.NewOrchestrator(storysvc.Deps{
-		Stories:        storyRepo,
-		Children:       childRepo,
-		LLM:            llmClient,
-		Budget:         budget,
-		PreCheck:       preChecker,
-		PostCheck:      postChecker,
-		MemorySelector: memorySelector,
-		PromptTmpl:     "safety/system_prompt.tmpl",
-		FallbackDir:    "safety/fallback_stories",
-		StoryModel:     cfg.LLM.StoryModel,
-		Temperature:    cfg.LLM.StoryTemperature,
-		PromptVersion:  "v1",
+		Stories:         storyRepo,
+		Children:        childRepo,
+		LLM:             llmClient,
+		Budget:          budget,
+		PreCheck:        preChecker,
+		PostCheck:       postChecker,
+		MemorySelector:  memorySelector,
+		Storylines:      storylineRepo,
+		StorylineCtxBld: storylineCtxBld,
+		ChapterHook:     chapterHook,
+		Biz:             bm,
+		PromptTmpl:      "safety/system_prompt.tmpl",
+		FallbackDir:     "safety/fallback_stories",
+		StoryModel:      cfg.LLM.StoryModel,
+		Temperature:     cfg.LLM.StoryTemperature,
+		PromptVersion:   "v1",
 	})
 	if err != nil {
 		return fmt.Errorf("init orchestrator: %w", err)
@@ -293,6 +302,9 @@ func run() error {
 		storyRepo, childRepo, storageClient,
 		time.Duration(cfg.Storage.PresignedTTLSec)*time.Second,
 	)
+
+	// Plan 8: heartbeat handler — time-aware greeting + active storylines list.
+	heartbeatHandler := api.NewHeartbeatHandler(childRepo, storylineRepo, time.Now)
 
 	counter := middleware.NewRedisCounter(rdb)
 	genRateLimit := middleware.GenerateRateLimit(counter, cfg.LLM.GenerateRPM, time.Minute)
@@ -312,6 +324,7 @@ func run() error {
 		BudgetGuard:  budgetGuard,
 		Audio:        audioHandler,
 		Bootstrap:    bootstrapHandler,
+		Heartbeat:    heartbeatHandler,
 	})
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
