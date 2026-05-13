@@ -34,6 +34,9 @@ type RouterDeps struct {
 
 	// Bootstrap (Plan 6)
 	Bootstrap *BootstrapHandler
+
+	// Heartbeat (Plan 8)
+	Heartbeat *HeartbeatHandler
 }
 
 // NewRouter builds the gin.Engine with the standard middleware chain,
@@ -77,6 +80,9 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		}
 		if deps.Bootstrap != nil {
 			deps.Bootstrap.RegisterRoutes(auth)
+		}
+		if deps.Heartbeat != nil {
+			deps.Heartbeat.RegisterRoutes(auth)
 		}
 		if deps.Story != nil {
 			gen := auth.Group("")
