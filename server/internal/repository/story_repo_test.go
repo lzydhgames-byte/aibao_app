@@ -183,6 +183,30 @@ func TestStoryRepo_RecentByStoryline_ReturnsOrderedByEpisodeDesc(t *testing.T) {
 	assert.Equal(t, 1, *list[2].EpisodeNo)
 }
 
+func TestStoryRepo_ElementsByStory_OrderedByWeightDesc(t *testing.T) {
+	_, _, srepo, child, cleanup := setupStoryRepo(t)
+	defer cleanup()
+
+	story := &model.Story{
+		ChildID: child.ID, TextContent: "x", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1",
+	}
+	elements := []*model.StoryElement{
+		{ElementType: "character", Name: "爱宝", RecallWeight: 1.5},
+		{ElementType: "place", Name: "竹林", RecallWeight: 0.5},
+		{ElementType: "character", Name: "小恐龙", RecallWeight: 2.0},
+	}
+	require.NoError(t, srepo.CreateWithOutbox(context.Background(), story, elements, []*model.OutboxEvent{{
+		EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
+	}}))
+
+	got, err := srepo.ElementsByStory(context.Background(), story.ID, []string{"character", "place"}, 8)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	assert.Equal(t, "小恐龙", got[0].Name)
+	assert.Equal(t, "爱宝", got[1].Name)
+	assert.Equal(t, "竹林", got[2].Name)
+}
+
 func TestStoryRepo_RecentByStoryline_EmptyOk(t *testing.T) {
 	_, _, srepo, _, cleanup := setupStoryRepo(t)
 	defer cleanup()

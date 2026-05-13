@@ -30,6 +30,10 @@ type StoryRepo interface {
 	// RecentByStoryline returns up to limit stories belonging to the given storyline,
 	// ordered by episode_no DESC (most recent episode first).
 	RecentByStoryline(ctx context.Context, storylineID int64, limit int) ([]*model.Story, error)
+
+	// ElementsByStory returns story_elements for the given story id filtered by
+	// element_type IN types (e.g. {"character","place"}), ordered by recall_weight DESC.
+	ElementsByStory(ctx context.Context, storyID int64, types []string, limit int) ([]*model.StoryElement, error)
 }
 
 type storyRepo struct {
@@ -106,6 +110,19 @@ func (r *storyRepo) RecentByStoryline(ctx context.Context, storylineID int64, li
 		Order("episode_no DESC").
 		Limit(limit).
 		Find(&out).Error
+	return out, err
+}
+
+func (r *storyRepo) ElementsByStory(ctx context.Context, storyID int64, types []string, limit int) ([]*model.StoryElement, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	var out []*model.StoryElement
+	q := r.db.WithContext(ctx).Where("story_id = ?", storyID)
+	if len(types) > 0 {
+		q = q.Where("element_type IN ?", types)
+	}
+	err := q.Order("recall_weight DESC").Limit(limit).Find(&out).Error
 	return out, err
 }
 
