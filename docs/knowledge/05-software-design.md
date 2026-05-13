@@ -183,3 +183,32 @@ test：写个 `stubComposer{ wantResp *ComposeResponse, wantErr error }` 在 han
 
 **类比**：买咖啡——你（handler）只需要"会给你拿铁"的店；不需要那家店还会做意面、披萨、煎饺。你的"店"接口只列 `MakeLatte()` 一个方法；任何能做拿铁的店（service）隐式满足。
 
+
+
+## 5.18 工程化"剧情连续感"：数据 + prompt + 校验三层叠加
+
+让 LLM 表现出"承接上文"的剧情质量看起来纯 prompt 工程的事——其实需要**三个独立层联动**：
+
+1. **数据层（持久化身份）**：必须有"连续剧"这个一级实体（`storylines` 表），让多个故事关联到同一系列；不能光靠 memory 表（memory 是泛化的"近期发生过的事"，没有"连续剧第 N 集"的语义）
+2. **Prompt 层（结构化承接信息）**：在 system prompt 加"## 上一集剧情"段，包含 (a) 近 3 集 30 字总结、(b) 上一集结尾钩子、(c) "请承接这些角色和场景"明确指令。位置必须靠前（紧跟 IDENTITY 段后），措辞用祈使句而非"可以"
+3. **校验层（拒绝偏离）**：PostCheck 引入 `RequireContinuity + PreviousElements` 硬约束——LLM 输出必须至少提到 1 个上一集元素，否则视作"主角偏离"走 fallback
+
+**单做任一层都不够**：
+- 只做数据层 + prompt → LLM 自由发挥，**经常忘**承接（Plan 6 状态：彩蛋率为 0）
+- 只做 prompt + 校验 → 没有 storyline 实体，无法在多次请求间稳定关联"哪个是上一集"
+- 只做数据层 + 校验 → LLM 不知道要承接什么，PostCheck 全拒绝
+
+**为什么需要**：LLM 应用工程师容易把所有期望都压在 prompt 上——结果 prompt 越写越长、效果还不稳定。**把约束分散到数据 / prompt / 校验三层**是更可控、可调、可监控的工程姿势：每一层都能独立测试 + 独立调优 + 独立故障排查。
+
+**项目演进轨迹**（Plan 4 → 8 的彩蛋质量跃迁）：
+- **Plan 4** 留 `stories.storyline_id` 占位列（数据层地基）— 当时不知道何时启用
+- **Plan 6** 加 Memory Summarizer + Selector + 模板分支（prompt 层第一版，软提示）— 彩蛋率 0，LLM 无视
+- **Plan 6b** prompt 三维调优"位置×措辞×内容浓度"— Story 23 出现"借用元素"（Plan 6b 知识库 11.10）
+- **Plan 8** 三层叠加完整版：
+  - 数据层激活：Task 0+3+4 `storylines` 表 + StorylineRepo
+  - prompt 层结构化：Task 6+7 StorylineContextBuilder + 模板段
+  - 校验层硬约束：Task 8 PostCheck `not_continuing` 规则
+  - 顺势调用增强：Task 5 ChapterHookExtractor 提取下集预告喂回（[5.18 + 11.11 联动](#1111-llm-顺势调用模式用低成本调用承担辅助任务)）
+- **效果**：ep2 LLM 真说出 "**小宇~昨天咱们和小熊玩得可开心啦**" —— 单层调优永远做不到这种"显式时间感 + 具名引用"质量
+
+**类比**：餐厅做"招牌系列菜"不能光靠厨师创意——要有 (a) 菜单上"招牌系列"独立分类（数据层）、(b) 厨师培训手册写"系列菜要保留某种风味"（prompt 层）、(c) 老板尝菜时拒绝跑偏的（校验层）。三者缺一不可。靠厨师"自觉记得"做出的招牌菜质量永远不稳定。

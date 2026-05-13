@@ -181,6 +181,7 @@
 - **2026-05-12** — Plan 6 完成：BOOTSTRAP 首次相遇仪式 + 记忆深化（Summarizer + Selector）+ 彩蛋串联管线（含 2 个 latent bugfix：outbox payload 后改不生效 / intent_model endpoint 配错文生图模型）
 - **2026-05-13** — Plan 6b 完成：5 项 known-issue 修复 + 第一次真实证明彩蛋回调有效（Story 23 → Story 22 小精灵）
 - **2026-05-14** — Plan 7 完成：音频混音管线就位但 MVP 暂不启用 BGM；纯 TTS smoke 验证降级链路完整工作（`bgm_not_found → audio.mix.degraded → pure TTS`），未来收 BGM 上传 COS + `make seed-bgm` 零代码启用
+- **2026-05-15** — Plan 8 完成：连续剧 + HEARTBEAT 伪推送（轻量版）落地。第一次实现 LLM 显式承认上一集（ep2 真说"昨天和小熊玩得可开心"），剧情连续感工程化
 
 ## 关键技术教训（来自实施过程）
 
@@ -202,3 +203,4 @@
 - **软提示 prompt 工程的局限**（Plan 6 实测）：把"上次故事的 30 字总结"塞进 system prompt 尾部 + 写"可以自然回调"，LLM 仍倾向沿着 user prompt 自由发挥，对 memory context **几乎不响应**——Plan 6 smoke 海洋故事记忆 + 森林新主题 → 故事 3 完全没出现海洋元素。"软提示"哲学优雅但效果弱。后续要么把 memory 段抬到更高优先级位置、要么改用更明确"请尝试借用..."措辞、要么加一轮"故事编辑 LLM call"检查回调是否出现并 force regenerate。**先验证、后优化、再上线**是 prompt 工程的标准节奏。已记录知识库 11.10。
 - **基础设施先于内容**（Plan 7 设计选择）：Plan 7 选择把整条 BGM 管线（migration + repo + cache + mixer + orchestrator + CLI）写完上线，但**不收一首 BGM**。理由：基础设施编写 + 测试是确定性工作可外包给 subagent；BGM 素材筛选是人类品味判断的 1-2 小时事，把它压在 critical path 上是错配。**等用户反馈想要音乐时再花那 1-2 小时**——零代码工作启用，Plan 6b 投资的 `bgm_not_found_total` 指标今天就在 dashboard 提供"启用前后差多少"的可见信号。这条原则可推广：所有"内容驱动 + 代码驱动"双轨任务，**代码先行，内容后补**。已记录知识库（devlog 2026-05-14 教训第 3 条）。
 - **prompt 工程的措辞 + 位置联动**（Plan 6b 实测修正 Plan 6 结论）：Plan 6 时 memory 段在 system prompt 末尾 + 措辞"可以自然回调"，LLM 完全无视。Plan 6b 同时把段落移到 IDENTITY 之后 + 改成"请尝试借用以下记忆里的角色或场景"，Story 23 真回调了 Story 22 的小精灵——**单独改一项可能没效果，组合改才质变**。这条印证了知识库 11.10「软提示 vs 硬提示」的二元论过于简化，真实工程是"软提示 + 位置加权 + 措辞强度"的三维调节。已追加到知识库 11.10 末尾。
+- **彩蛋质量的"技术栈叠加"效应**（Plan 8 标志性突破）：Plan 6 时彩蛋率 0；Plan 6b 加"位置×措辞×内容浓度"三维调优 → 出现"借用元素"；Plan 8 在此基础上**叠加**(a) `storylines` 表给"连续剧"独立一级实体身份、(b) 系统 prompt 加"## 上一集剧情"结构化承接段、(c) PostCheck 引入 `RequireContinuity + PreviousElements` 硬约束、(d) chapter_hook 顺势调用提取 20 字下集预告 → ep2 LLM **真说出**"小宇~昨天咱们和小熊玩得可开心啦"。**单一手段达不到剧情感，多套机制叠加才出真效果**：数据约束 + prompt 结构 + 校验硬约束 + 顺势调用，缺一不可。这是 LLM 应用工程的标志性"组合拳"模式。已记录知识库 5.18 + 11.11。
