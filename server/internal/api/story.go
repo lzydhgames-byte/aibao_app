@@ -30,11 +30,13 @@ func (h *StoryHandler) RegisterRoutes(g *gin.RouterGroup) {
 }
 
 type generateReq struct {
-	ChildID  int64  `json:"child_id" binding:"required"`
-	Prompt   string `json:"prompt" binding:"required"`
-	Duration int    `json:"duration" binding:"required"`
-	Style    string `json:"style" binding:"required"`
-	Topic    string `json:"topic"`
+	ChildID        int64  `json:"child_id" binding:"required"`
+	Prompt         string `json:"prompt" binding:"required"`
+	Duration       int    `json:"duration" binding:"required"`
+	Style          string `json:"style" binding:"required"`
+	Topic          string `json:"topic"`
+	StartStoryline bool   `json:"start_storyline"`
+	StorylineID    *int64 `json:"storyline_id,omitempty"`
 }
 
 func (h *StoryHandler) generate(c *gin.Context) {
@@ -52,9 +54,17 @@ func (h *StoryHandler) generate(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_duration", "user_msg": "duration 必须是 5/10/15"})
 		return
 	}
+	if req.StartStoryline && req.StorylineID != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"reason":   "invalid_argument",
+			"user_msg": "不能同时启动新连续剧和续接已有连续剧",
+		})
+		return
+	}
 	out, err := h.orch.Generate(c.Request.Context(), story.GenerateParams{
 		ChildID: req.ChildID, UserID: uid,
 		Prompt: req.Prompt, Duration: req.Duration, Style: req.Style, Topic: req.Topic,
+		StartStoryline: req.StartStoryline, StorylineID: req.StorylineID,
 	})
 	if err != nil {
 		RespondError(c, err)
@@ -93,6 +103,8 @@ func storyJSON(s *model.Story) gin.H {
 		"duration_minutes": s.DurationMinutes,
 		"style":            s.Style,
 		"topic":            s.Topic,
+		"storyline_id":     s.StorylineID,
+		"episode_no":       s.EpisodeNo,
 		"created_at":       s.CreatedAt,
 	}
 }

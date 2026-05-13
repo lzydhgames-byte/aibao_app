@@ -127,6 +127,44 @@ func TestStoryHandler_Generate_PreCheckRejection(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "redline_matched")
 }
 
+func TestGenerate_BothStartAndContinue_400(t *testing.T) {
+	r, _ := setupStoryHandler(t)
+	body, _ := json.Marshal(map[string]any{
+		"child_id": 1, "prompt": "x", "duration": 5, "style": "温馨治愈",
+		"start_storyline": true, "storyline_id": 42,
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stories/generate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_argument")
+}
+
+func TestGenerate_Response_IncludesStorylineFields(t *testing.T) {
+	r, repo := setupStoryHandler(t)
+	// Pre-populate fake repo to mimic a sequel story result; easier: trigger
+	// generate and afterwards mutate the stored story is awkward. Instead,
+	// patch repo.last with the expected storyline metadata via response check:
+	// the orchestrator (no storyline deps) won't fill these; so test the JSON
+	// shape by directly using storyJSON via a get call.
+	storyID := int64(555)
+	sid := int64(77)
+	eno := 3
+	repo.last = &model.Story{
+		ID: storyID, ChildID: 1, Title: "T", TextContent: "x",
+		StorylineID: &sid, EpisodeNo: &eno, AudioStatus: model.AudioStatusPending,
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stories/555", nil)
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	assert.Equal(t, float64(77), out["storyline_id"])
+	assert.Equal(t, float64(3), out["episode_no"])
+}
+
 func TestStoryHandler_Get_OK(t *testing.T) {
 	r, repo := setupStoryHandler(t)
 	body, _ := json.Marshal(map[string]any{
