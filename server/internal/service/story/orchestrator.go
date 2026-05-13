@@ -3,13 +3,16 @@ package story
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/aibao/server/internal/gateway/llm"
+	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/model"
 	apperr "github.com/aibao/server/internal/pkg/errors"
 	"github.com/aibao/server/internal/pkg/logger"
+	"github.com/aibao/server/internal/repository"
 	"github.com/aibao/server/internal/service/safety"
 	"github.com/aibao/server/internal/service/story/prompt"
 )
@@ -37,20 +40,42 @@ type MemorySelector interface {
 	BuildContext(ctx context.Context, childID int64) string
 }
 
+// StorylineRepo is the minimal storyline-repo surface the orchestrator needs.
+// (Plan 7 §5.17 ISP — consumer declares its narrow view.)
+type StorylineRepo interface {
+	Create(ctx context.Context, sl *model.Storyline) error
+	IncrementEpisode(ctx context.Context, id int64, hint string) error
+}
+
+// StorylineContextBuilderAPI is the slice of StorylineContextBuilder behavior
+// the orchestrator depends on. Allows test doubles.
+type StorylineContextBuilderAPI interface {
+	Build(ctx context.Context, storylineID int64) (*StorylineContext, error)
+}
+
+// ChapterHookAPI is the slice of ChapterHookExtractor used by the orchestrator.
+type ChapterHookAPI interface {
+	Extract(ctx context.Context, storyText string) string
+}
+
 // Deps groups Orchestrator dependencies.
 type Deps struct {
-	Stories        StoryRepo
-	Children       ChildRepo
-	LLM            llm.Client
-	Budget         Budget
-	PreCheck       *safety.PreChecker
-	PostCheck      *safety.PostChecker
-	MemorySelector MemorySelector // Plan 6
-	PromptTmpl     string
-	FallbackDir    string
-	StoryModel     string
-	Temperature    float64
-	PromptVersion  string
+	Stories         StoryRepo
+	Children        ChildRepo
+	LLM             llm.Client
+	Budget          Budget
+	PreCheck        *safety.PreChecker
+	PostCheck       *safety.PostChecker
+	MemorySelector  MemorySelector // Plan 6
+	Storylines      StorylineRepo  // Plan 8 (optional)
+	StorylineCtxBld StorylineContextBuilderAPI // Plan 8 (optional)
+	ChapterHook     ChapterHookAPI // Plan 8 (optional)
+	Biz             *metrics.Business // Plan 8 metrics (nil-safe)
+	PromptTmpl      string
+	FallbackDir     string
+	StoryModel      string
+	Temperature     float64
+	PromptVersion   string
 }
 
 // Orchestrator runs the PreCheck → PromptBuild → LLM → PostCheck → Persist
@@ -76,17 +101,24 @@ func NewOrchestrator(d Deps) (*Orchestrator, error) {
 
 // GenerateParams is the structured input.
 type GenerateParams struct {
-	ChildID  int64
-	UserID   int64
-	Prompt   string
-	Duration int
-	Style    string
-	Topic    string
+	ChildID        int64
+	UserID         int64
+	Prompt         string
+	Duration       int
+	Style          string
+	Topic          string
+	StartStoryline bool   // Plan 8: create a new storyline; this story = episode 1
+	StorylineID    *int64 // Plan 8: continue an existing storyline
 }
 
 // Generate is the main entry point.
 func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.Story, error) {
 	lg := logger.FromCtx(ctx)
+
+	// Plan 8: defense-in-depth mutual-exclusion check.
+	if p.StartStoryline && p.StorylineID != nil {
+		return nil, apperr.New(apperr.CodeInvalidArgument, "invalid_argument", "不能同时启动新连续剧和续接已有连续剧")
+	}
 
 	child, err := o.d.Children.FindByID(ctx, p.ChildID)
 	if err != nil {
@@ -110,13 +142,52 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		return nil, mapSafetyReject(preOut.RejectReason, preOut.MatchedRule)
 	}
 
+	// Plan 8: preprocess storyline state.
+	var (
+		storylineID   *int64
+		episodeNumber int
+		storylineCtx  *StorylineContext
+	)
+	switch {
+	case p.StartStoryline:
+		if o.d.Storylines == nil {
+			return nil, apperr.New(apperr.CodeInternal, "storyline_unavailable", "服务暂时不可用，请稍后再试")
+		}
+		sl := &model.Storyline{ChildID: child.ID, Status: model.StorylineStatusActive}
+		if err := o.d.Storylines.Create(ctx, sl); err != nil {
+			return nil, apperr.Wrap(err, apperr.CodeInternal, "storyline_create_failed", "服务暂时不可用，请稍后再试")
+		}
+		if o.d.Biz != nil {
+			o.d.Biz.StorylineCreatedTotal.Inc()
+		}
+		storylineID = &sl.ID
+		episodeNumber = 1
+	case p.StorylineID != nil:
+		if o.d.StorylineCtxBld == nil {
+			return nil, apperr.New(apperr.CodeInternal, "storyline_unavailable", "服务暂时不可用，请稍后再试")
+		}
+		slCtx, err := o.d.StorylineCtxBld.Build(ctx, *p.StorylineID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return nil, apperr.New(apperr.CodeNotFound, "storyline_not_found", "找不到该连续剧")
+			}
+			return nil, apperr.Wrap(err, apperr.CodeInternal, "storyline_load_failed", "服务暂时不可用，请稍后再试")
+		}
+		if slCtx.ChildID != child.ID {
+			return nil, apperr.New(apperr.CodePermissionDenied, "not_owner", "无权访问该连续剧")
+		}
+		storylineID = p.StorylineID
+		episodeNumber = slCtx.EpisodeNumber
+		storylineCtx = slCtx
+	}
+
 	memCtx := ""
 	if o.d.MemorySelector != nil {
 		memCtx = o.d.MemorySelector.BuildContext(ctx, child.ID)
 		lg.Debug("orchestrator.memory_context", "child_id", child.ID, "len", len(memCtx))
 	}
 
-	po := o.builder.Build(prompt.BuildInput{
+	buildIn := prompt.BuildInput{
 		ChildNickname:            child.Nickname,
 		ChildAgeYears:            ageYearsFromBirthday(child.Birthday),
 		ChildGender:              child.Gender,
@@ -129,7 +200,13 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		NormalizedIPInstructions: preOut.IPInstructions,
 		MemorySummary:            memCtx,
 		PromptVersion:            o.d.PromptVersion,
-	})
+	}
+	if storylineCtx != nil {
+		buildIn.StorylineHook = storylineCtx.PreviousHook
+		buildIn.StorylineRecentSummaries = storylineCtx.RecentSummaries
+		buildIn.EpisodeNumber = storylineCtx.EpisodeNumber
+	}
+	po := o.builder.Build(buildIn)
 
 	var llmText string
 	var llmInTok, llmOutTok int
@@ -155,12 +232,17 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 
 	usedFallback := false
 	if !llmFailed {
-		postOut := o.d.PostCheck.Check(safety.PostCheckInput{
+		postIn := safety.PostCheckInput{
 			StoryText:     llmText,
 			ChildNickname: child.Nickname,
 			ChildFearList: fearList,
 			Duration:      p.Duration,
-		})
+		}
+		if storylineCtx != nil {
+			postIn.RequireContinuity = true
+			postIn.PreviousElements = pickElements(storylineCtx)
+		}
+		postOut := o.d.PostCheck.Check(postIn)
 		if !postOut.Pass {
 			lg.Warn("story.postcheck.fail", "reason", postOut.RejectReason, "rule", postOut.MatchedRule)
 			llmFailed = true
@@ -174,6 +256,10 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		}
 		llmText = fb
 		usedFallback = true
+		// Plan 8: fallback story must NOT be attached to the storyline (would
+		// pollute its continuity / wrongly bump episode_count).
+		storylineID = nil
+		episodeNumber = 0
 	}
 
 	elemRaw := ExtractElements(llmText, preOut.NormalizedIPs)
@@ -194,9 +280,14 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		DurationMinutes: p.Duration,
 		Style:           p.Style,
 		Topic:           p.Topic,
+		StorylineID:     storylineID,
 		PromptVersion:   o.d.PromptVersion,
 		LLMInputTokens:  llmInTok,
 		LLMOutputTokens: llmOutTok,
+	}
+	if episodeNumber > 0 {
+		eno := episodeNumber
+		story.EpisodeNo = &eno
 	}
 	if usedFallback {
 		story.LLMModel = "fallback"
@@ -248,6 +339,20 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 	})
 	ttsEvent.Payload = patchedTTS
 
+	// Plan 8: post-write storyline bookkeeping (skip on fallback or non-series).
+	if !usedFallback && storylineID != nil && o.d.Storylines != nil {
+		hint := ""
+		if o.d.ChapterHook != nil {
+			hint = o.d.ChapterHook.Extract(ctx, llmText)
+		}
+		if err := o.d.Storylines.IncrementEpisode(ctx, *storylineID, hint); err != nil {
+			lg.Warn("story.storyline.increment_failed", "err", err.Error())
+		}
+		if o.d.Biz != nil {
+			o.d.Biz.StorylineEpisodesTotal.Inc()
+		}
+	}
+
 	lg.Info("story.generate.done",
 		"story_id", story.ID,
 		"child_id", child.ID,
@@ -256,6 +361,15 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		"output_tokens", llmOutTok,
 	)
 	return story, nil
+}
+
+// pickElements returns previous-episode character/place names for the
+// PostCheck not_continuing rule, or nil when no context is available.
+func pickElements(c *StorylineContext) []string {
+	if c == nil || len(c.PreviousElements) == 0 {
+		return nil
+	}
+	return c.PreviousElements
 }
 
 func mapSafetyReject(reason, matched string) error {

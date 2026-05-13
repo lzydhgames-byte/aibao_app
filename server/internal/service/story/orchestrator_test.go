@@ -13,6 +13,7 @@ import (
 	"github.com/aibao/server/internal/gateway/llm"
 	"github.com/aibao/server/internal/model"
 	apperr "github.com/aibao/server/internal/pkg/errors"
+	"github.com/aibao/server/internal/repository"
 	"github.com/aibao/server/internal/service/safety"
 )
 
@@ -281,6 +282,215 @@ func TestOrchestrator_MemorySelector_NonEmpty(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sel.called)
 	assert.Contains(t, cl.lastSystem, "上次救了小恐龙")
+}
+
+// --- Plan 8 fakes ---
+
+type fakeStorylineRepo struct {
+	createCalls    int
+	created        *model.Storyline
+	incCalls       int
+	lastIncID      int64
+	lastIncHint    string
+	createErr      error
+	incErr         error
+	nextCreateID   int64
+}
+
+func (f *fakeStorylineRepo) Create(_ context.Context, sl *model.Storyline) error {
+	f.createCalls++
+	if f.createErr != nil {
+		return f.createErr
+	}
+	if f.nextCreateID == 0 {
+		f.nextCreateID = 555
+	}
+	sl.ID = f.nextCreateID
+	f.created = sl
+	return nil
+}
+
+func (f *fakeStorylineRepo) IncrementEpisode(_ context.Context, id int64, hint string) error {
+	f.incCalls++
+	f.lastIncID = id
+	f.lastIncHint = hint
+	return f.incErr
+}
+
+type fakeCtxBuilder struct {
+	out *StorylineContext
+	err error
+}
+
+func (f *fakeCtxBuilder) Build(_ context.Context, _ int64) (*StorylineContext, error) {
+	return f.out, f.err
+}
+
+type fakeChapterHook struct {
+	out      string
+	calls    int
+}
+
+func (f *fakeChapterHook) Extract(_ context.Context, _ string) string {
+	f.calls++
+	return f.out
+}
+
+func newOrchPlan8(t *testing.T, mock llm.Client, slRepo StorylineRepo, ctxBld StorylineContextBuilderAPI, hook ChapterHookAPI) (*Orchestrator, *fakeStoryRepo) {
+	t.Helper()
+	rs := &safety.RuleSet{AllRedlinesFlat: []string{"血腥"}, Redlines: map[string][]string{"violence": {"血腥"}}}
+	srepo := &fakeStoryRepo{}
+	crepo := &fakeChildRepo{c: mkChild()}
+	orch, err := NewOrchestrator(Deps{
+		Stories:         srepo,
+		Children:        crepo,
+		LLM:             mock,
+		Budget:          &stubBudget{allow: true},
+		PreCheck:        safety.NewPreChecker(rs, safety.NewNoopIntentProvider()),
+		PostCheck:       safety.NewPostChecker(rs),
+		Storylines:      slRepo,
+		StorylineCtxBld: ctxBld,
+		ChapterHook:     hook,
+		PromptTmpl:      "../../../safety/system_prompt.tmpl",
+		FallbackDir:     "../../../safety/fallback_stories",
+		StoryModel:      "doubao-1.5-pro-32k",
+		Temperature:     0.8,
+		PromptVersion:   "v1",
+	})
+	require.NoError(t, err)
+	return orch, srepo
+}
+
+func TestGenerate_StartStoryline_CreatesRowAndEpisode1(t *testing.T) {
+	mock := llm.NewMock()
+	mock.Response.Text = "小宇推开门走进竹林。爱宝跟着小宇。小宇说我们出发。"
+	slRepo := &fakeStorylineRepo{nextCreateID: 77}
+	hook := &fakeChapterHook{out: "下集预告"}
+	orch, _ := newOrchPlan8(t, mock, slRepo, nil, hook)
+	out, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "讲个奥特曼睡前故事",
+		Duration: 5, Style: "温馨治愈", StartStoryline: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, out.StorylineID)
+	assert.Equal(t, int64(77), *out.StorylineID)
+	require.NotNil(t, out.EpisodeNo)
+	assert.Equal(t, 1, *out.EpisodeNo)
+	assert.Equal(t, 1, slRepo.createCalls)
+	assert.Equal(t, 1, slRepo.incCalls)
+	assert.Equal(t, "下集预告", slRepo.lastIncHint)
+}
+
+func TestGenerate_ContinueStoryline_PassesEpisode2AndContext(t *testing.T) {
+	cl := &capturingLLM{text: "小宇又遇到小恐龙。爱宝跟着小宇。小宇说我们继续。"}
+	bld := &fakeCtxBuilder{out: &StorylineContext{
+		StorylineID: 88, ChildID: 7, EpisodeNumber: 2,
+		PreviousHook:    "钩子A", RecentSummaries: []string{"上集摘要"},
+		PreviousElements: []string{"小恐龙"},
+	}}
+	slID := int64(88)
+	slRepo := &fakeStorylineRepo{}
+	hook := &fakeChapterHook{out: "下集"}
+	orch, _ := newOrchPlan8(t, cl, slRepo, bld, hook)
+	out, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "继续",
+		Duration: 5, Style: "温馨治愈", StorylineID: &slID,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, out.StorylineID)
+	assert.Equal(t, int64(88), *out.StorylineID)
+	require.NotNil(t, out.EpisodeNo)
+	assert.Equal(t, 2, *out.EpisodeNo)
+	assert.Contains(t, cl.lastSystem, "钩子A")
+	assert.Contains(t, cl.lastSystem, "上集摘要")
+	assert.Equal(t, 1, slRepo.incCalls)
+	assert.Equal(t, int64(88), slRepo.lastIncID)
+}
+
+func TestGenerate_StorylineNotOwnedByChild_Returns403(t *testing.T) {
+	mock := llm.NewMock()
+	mock.Response.Text = "x"
+	bld := &fakeCtxBuilder{out: &StorylineContext{StorylineID: 1, ChildID: 999, EpisodeNumber: 2}}
+	slID := int64(1)
+	orch, _ := newOrchPlan8(t, mock, &fakeStorylineRepo{}, bld, &fakeChapterHook{})
+	_, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "x",
+		Duration: 5, Style: "温馨治愈", StorylineID: &slID,
+	})
+	require.Error(t, err)
+	ae, _ := apperr.AsAppError(err)
+	require.NotNil(t, ae)
+	assert.Equal(t, apperr.CodePermissionDenied, ae.Code)
+}
+
+func TestGenerate_StorylineNotFound_Returns404(t *testing.T) {
+	mock := llm.NewMock()
+	bld := &fakeCtxBuilder{err: repository.ErrNotFound}
+	slID := int64(1)
+	orch, _ := newOrchPlan8(t, mock, &fakeStorylineRepo{}, bld, &fakeChapterHook{})
+	_, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "x",
+		Duration: 5, Style: "温馨治愈", StorylineID: &slID,
+	})
+	require.Error(t, err)
+	ae, _ := apperr.AsAppError(err)
+	require.NotNil(t, ae)
+	assert.Equal(t, apperr.CodeNotFound, ae.Code)
+}
+
+func TestGenerate_BothStartAndContinue_400(t *testing.T) {
+	mock := llm.NewMock()
+	slID := int64(1)
+	orch, _ := newOrchPlan8(t, mock, &fakeStorylineRepo{}, &fakeCtxBuilder{}, &fakeChapterHook{})
+	_, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "x",
+		Duration: 5, Style: "温馨治愈",
+		StartStoryline: true, StorylineID: &slID,
+	})
+	require.Error(t, err)
+	ae, _ := apperr.AsAppError(err)
+	require.NotNil(t, ae)
+	assert.Equal(t, apperr.CodeInvalidArgument, ae.Code)
+}
+
+func TestGenerate_PostCheckNotContinuing_FallsbackWithNullStorylineID(t *testing.T) {
+	mock := llm.NewMock()
+	// LLM text does NOT mention 小恐龙 → PostCheck not_continuing triggers.
+	// Use a string that also fails on retry (mock returns same text both times).
+	mock.Response.Text = "小宇看到一只小猫。爱宝跟着小宇。小宇说我们走。"
+	bld := &fakeCtxBuilder{out: &StorylineContext{
+		StorylineID: 99, ChildID: 7, EpisodeNumber: 3,
+		PreviousElements: []string{"小恐龙", "竹林"},
+	}}
+	slID := int64(99)
+	slRepo := &fakeStorylineRepo{}
+	hook := &fakeChapterHook{out: "x"}
+	orch, repo := newOrchPlan8(t, mock, slRepo, bld, hook)
+	out, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "讲个故事",
+		Duration: 5, Style: "温馨治愈", StorylineID: &slID,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, out.StorylineID)
+	assert.Nil(t, out.EpisodeNo)
+	assert.Equal(t, 0, slRepo.incCalls)
+	assert.Equal(t, "fallback", repo.created.LLMModel)
+}
+
+func TestGenerate_ChapterHookFails_StoryStillShipsHintEmpty(t *testing.T) {
+	mock := llm.NewMock()
+	mock.Response.Text = "小宇推开门走进竹林。爱宝跟着小宇。小宇说我们出发。"
+	slRepo := &fakeStorylineRepo{nextCreateID: 33}
+	hook := &fakeChapterHook{out: ""} // simulates fail-open
+	orch, _ := newOrchPlan8(t, mock, slRepo, nil, hook)
+	out, err := orch.Generate(context.Background(), GenerateParams{
+		ChildID: 7, UserID: 42, Prompt: "讲个故事",
+		Duration: 5, Style: "温馨治愈", StartStoryline: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, out.StorylineID)
+	assert.Equal(t, 1, slRepo.incCalls)
+	assert.Equal(t, "", slRepo.lastIncHint)
 }
 
 func TestOrchestrator_MemorySelector_EmptyStillGenerates(t *testing.T) {

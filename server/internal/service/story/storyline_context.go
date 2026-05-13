@@ -14,6 +14,7 @@ import (
 // prompt builder and (parts of) PostCheck for sequel generation.
 type StorylineContext struct {
 	StorylineID      int64
+	ChildID          int64    // for orchestrator-level ownership check
 	Title            string
 	EpisodeNumber    int      // sl.EpisodeCount + 1 (the upcoming episode)
 	RecentSummaries  []string // newest first; up to 3
@@ -70,6 +71,7 @@ func (b *StorylineContextBuilder) Build(ctx context.Context, storylineID int64) 
 
 	out := &StorylineContext{
 		StorylineID:   sl.ID,
+		ChildID:       sl.ChildID,
 		Title:         sl.Title,
 		EpisodeNumber: sl.EpisodeCount + 1,
 		PreviousHook:  sl.NextEpisodeHint,
