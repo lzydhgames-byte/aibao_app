@@ -35,6 +35,12 @@ type Business struct {
 	AudioMixDuration prometheus.Histogram     // no labels
 	AudioMixTotal    *prometheus.CounterVec   // labels: status (ok/degraded/failed)
 	BGMNotFoundTotal *prometheus.CounterVec   // labels: mood
+
+	// Plan 8
+	StorylineCreatedTotal      prometheus.Counter
+	StorylineEpisodesTotal     prometheus.Counter
+	ChapterHookExtractDuration prometheus.Histogram
+	ChapterHookExtractTotal    *prometheus.CounterVec // labels: status (ok/fail)
 }
 
 // NewBusiness registers all business metrics on reg and returns the bundle.
@@ -178,6 +184,31 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 				Help: "Count of BGM lookups that returned no row for a mood.",
 			}, []string{"mood"},
 		),
+		StorylineCreatedTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "storyline_created_total",
+				Help: "Count of new storylines created.",
+			},
+		),
+		StorylineEpisodesTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "storyline_episodes_total",
+				Help: "Count of episodes appended to storylines.",
+			},
+		),
+		ChapterHookExtractDuration: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "chapter_hook_extract_duration_seconds",
+				Help:    "Latency of the chapter hook extraction LLM call.",
+				Buckets: prometheus.ExponentialBuckets(0.1, 2, 8),
+			},
+		),
+		ChapterHookExtractTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "chapter_hook_extract_total",
+				Help: "Count of chapter hook extraction attempts by status (ok/fail).",
+			}, []string{"status"},
+		),
 	}
 	reg.MustRegister(
 		b.StoryGenerateTotal,
@@ -202,6 +233,10 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 		b.AudioMixDuration,
 		b.AudioMixTotal,
 		b.BGMNotFoundTotal,
+		b.StorylineCreatedTotal,
+		b.StorylineEpisodesTotal,
+		b.ChapterHookExtractDuration,
+		b.ChapterHookExtractTotal,
 	)
 	return b
 }

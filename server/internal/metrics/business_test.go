@@ -39,6 +39,11 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 	bm.AudioMixTotal.WithLabelValues("degraded").Inc()
 	bm.AudioMixTotal.WithLabelValues("failed").Inc()
 	bm.BGMNotFoundTotal.WithLabelValues("warm").Inc()
+	bm.StorylineCreatedTotal.Inc()
+	bm.StorylineEpisodesTotal.Inc()
+	bm.ChapterHookExtractDuration.Observe(0.3)
+	bm.ChapterHookExtractTotal.WithLabelValues("ok").Inc()
+	bm.ChapterHookExtractTotal.WithLabelValues("fail").Inc()
 
 	mf, err := reg.Gather()
 	require.NoError(t, err)
@@ -70,6 +75,10 @@ func TestBusinessMetrics_Registered(t *testing.T) {
 		"audio_mix_duration_seconds",
 		"audio_mix_total",
 		"bgm_not_found_total",
+		"storyline_created_total",
+		"storyline_episodes_total",
+		"chapter_hook_extract_duration_seconds",
+		"chapter_hook_extract_total",
 	} {
 		assert.Contains(t, joined, want, "missing metric %s", want)
 	}
