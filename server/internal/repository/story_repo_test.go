@@ -135,3 +135,59 @@ func TestStoryRepo_MarkAudioFailed(t *testing.T) {
 	assert.Equal(t, model.AudioStatusFailed, got.AudioStatus)
 	require.NotNil(t, got.AudioFailedAt)
 }
+
+func TestStoryRepo_RecentByStoryline_ReturnsOrderedByEpisodeDesc(t *testing.T) {
+	pg, cfg := startPG(t)
+	defer func() { _ = pg.Terminate(context.Background()) }()
+	db, err := NewDB(cfg)
+	require.NoError(t, err)
+	require.NoError(t, autoMigrateForTest(db))
+	defer Close(db)
+
+	ctx := context.Background()
+	urepo := NewUserRepo(db)
+	crepo := NewChildRepo(db)
+	srepo := NewStoryRepo(db)
+	slrepo := NewStorylineRepo(db)
+
+	u, _, err := urepo.CreateOrGet(ctx, &model.User{PhoneHash: "h_rs", PhoneEncrypted: []byte{1}, Nickname: "n"})
+	require.NoError(t, err)
+	bday, _ := time.Parse("2006-01-02", "2020-08-15")
+	child := &model.Child{UserID: u.ID, Nickname: "小宇", Gender: "boy", Birthday: bday, Profile: []byte(`{}`)}
+	require.NoError(t, crepo.Create(ctx, child))
+
+	sl := &model.Storyline{ChildID: child.ID, Title: "S", Status: model.StorylineStatusActive}
+	require.NoError(t, slrepo.Create(ctx, sl))
+
+	mk := func(ep int) *model.Story {
+		epNo := ep
+		s := &model.Story{
+			ChildID: child.ID, TextContent: "x", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1",
+			StorylineID: &sl.ID, EpisodeNo: &epNo,
+		}
+		require.NoError(t, srepo.CreateWithOutbox(ctx, s, nil, []*model.OutboxEvent{{
+			EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
+		}}))
+		return s
+	}
+	mk(1)
+	mk(2)
+	mk(3)
+
+	list, err := srepo.RecentByStoryline(ctx, sl.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, list, 3)
+	require.NotNil(t, list[0].EpisodeNo)
+	assert.Equal(t, 3, *list[0].EpisodeNo)
+	assert.Equal(t, 2, *list[1].EpisodeNo)
+	assert.Equal(t, 1, *list[2].EpisodeNo)
+}
+
+func TestStoryRepo_RecentByStoryline_EmptyOk(t *testing.T) {
+	_, _, srepo, _, cleanup := setupStoryRepo(t)
+	defer cleanup()
+
+	list, err := srepo.RecentByStoryline(context.Background(), 999999, 10)
+	require.NoError(t, err)
+	assert.Empty(t, list)
+}

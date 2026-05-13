@@ -26,6 +26,10 @@ type StoryRepo interface {
 
 	// MarkAudioFailed sets audio_status='failed' and stamps audio_failed_at.
 	MarkAudioFailed(ctx context.Context, storyID int64, errMsg string) error
+
+	// RecentByStoryline returns up to limit stories belonging to the given storyline,
+	// ordered by episode_no DESC (most recent episode first).
+	RecentByStoryline(ctx context.Context, storylineID int64, limit int) ([]*model.Story, error)
 }
 
 type storyRepo struct {
@@ -90,6 +94,19 @@ func (r *storyRepo) MarkAudioFailed(ctx context.Context, storyID int64, errMsg s
 			"audio_status":    model.AudioStatusFailed,
 			"audio_failed_at": now,
 		}).Error
+}
+
+func (r *storyRepo) RecentByStoryline(ctx context.Context, storylineID int64, limit int) ([]*model.Story, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	var out []*model.Story
+	err := r.db.WithContext(ctx).
+		Where("storyline_id = ?", storylineID).
+		Order("episode_no DESC").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
 }
 
 func (r *storyRepo) FindByID(ctx context.Context, id int64) (*model.Story, error) {
