@@ -118,3 +118,44 @@ func TestPostCheck_RejectChildPassive(t *testing.T) {
 	assert.False(t, out.Pass)
 	assert.Equal(t, "child_not_protagonist", out.RejectReason)
 }
+
+func TestPostCheck_NotContinuing_AllPreviousElementsAbsent(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := strings.Repeat("小宇和爱宝在公园玩耍。", 6)
+	out := pc.Check(PostCheckInput{
+		StoryText:         story,
+		ChildNickname:     "小宇",
+		Duration:          10,
+		RequireContinuity: true,
+		PreviousElements:  []string{"小恐龙阿绿", "竹林"},
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "not_continuing", out.RejectReason)
+	assert.Equal(t, "no_previous_element_mentioned", out.MatchedRule)
+}
+
+func TestPostCheck_Continuing_HitAtLeastOnePass(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门，决定勇敢地走进竹林。爱宝跟在小宇身后，一起冒险。小宇说：'我们去找小恐龙！'小宇带着大家一路前行到竹林深处。"
+	out := pc.Check(PostCheckInput{
+		StoryText:         story,
+		ChildNickname:     "小宇",
+		Duration:          10,
+		RequireContinuity: true,
+		PreviousElements:  []string{"竹林", "外星人"},
+	})
+	assert.True(t, out.Pass)
+}
+
+func TestPostCheck_RequireContinuityFalse_Skipped(t *testing.T) {
+	pc := newTestPostChecker(t)
+	story := "小宇推开了门，决定勇敢地往前走。爱宝跟在小宇身后，一起冒险。小宇说：'我们出发！'小宇带着大家一路前行。"
+	out := pc.Check(PostCheckInput{
+		StoryText:         story,
+		ChildNickname:     "小宇",
+		Duration:          10,
+		RequireContinuity: false,
+		PreviousElements:  []string{"小恐龙阿绿", "竹林"},
+	})
+	assert.True(t, out.Pass)
+}

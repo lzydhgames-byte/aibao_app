@@ -1,13 +1,19 @@
 package safety
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/aibao/server/internal/model"
+)
 
 // PostCheckInput captures everything PostCheck needs.
 type PostCheckInput struct {
-	StoryText     string
-	ChildNickname string
-	ChildFearList []string
-	Duration      int
+	StoryText         string
+	ChildNickname     string
+	ChildFearList     []string
+	Duration          int
+	RequireContinuity bool     // Plan 8: when true, story must mention >=1 PreviousElements
+	PreviousElements  []string // Plan 8: character/place names from the previous episode
 }
 
 // PostCheckOutput is the verdict.
@@ -63,6 +69,25 @@ func (p *PostChecker) Check(in PostCheckInput) PostCheckOutput {
 		aibaoCount := strings.Count(in.StoryText, "爱宝")
 		if aibaoCount > nickCount*2 {
 			return PostCheckOutput{Pass: false, RejectReason: "child_not_protagonist"}
+		}
+	}
+	if in.RequireContinuity && len(in.PreviousElements) > 0 {
+		hit := false
+		for _, e := range in.PreviousElements {
+			if e == "" {
+				continue
+			}
+			if strings.Contains(in.StoryText, e) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			return PostCheckOutput{
+				Pass:         false,
+				RejectReason: model.PostCheckReasonNotContinuing,
+				MatchedRule:  "no_previous_element_mentioned",
+			}
 		}
 	}
 	return PostCheckOutput{Pass: true}
