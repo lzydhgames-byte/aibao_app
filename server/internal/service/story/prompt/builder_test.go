@@ -168,6 +168,41 @@ func TestBuilder_NoTopicShowsAsPure(t *testing.T) {
 	assert.Contains(t, out.SystemPrompt, "无（纯娱乐）")
 }
 
+func TestBuild_StorylineSection_RendersWhenHookOrSummariesPresent(t *testing.T) {
+	b, err := NewBuilder(templatePath)
+	require.NoError(t, err)
+	out := b.Build(BuildInput{
+		ChildNickname:            "小宇",
+		ChildAgeYears:            5,
+		ChildGender:              "boy",
+		Duration:                 10,
+		Style:                    "温馨治愈",
+		StorylineHook:            "他们能找到宝藏吗",
+		StorylineRecentSummaries: []string{"第二集摘要", "第一集摘要"},
+		EpisodeNumber:            3,
+		PromptVersion:            "v1",
+	})
+	assert.Contains(t, out.SystemPrompt, "上一集剧情")
+	assert.Contains(t, out.SystemPrompt, "第 3 集")
+	assert.Contains(t, out.SystemPrompt, "他们能找到宝藏吗")
+	assert.Contains(t, out.SystemPrompt, "第二集摘要")
+	assert.Contains(t, out.SystemPrompt, "第一集摘要")
+}
+
+func TestBuild_StorylineSection_OmittedWhenBothEmpty(t *testing.T) {
+	b, err := NewBuilder(templatePath)
+	require.NoError(t, err)
+	out := b.Build(BuildInput{
+		ChildNickname: "小宇",
+		ChildAgeYears: 5,
+		ChildGender:   "boy",
+		Duration:      10,
+		Style:         "温馨治愈",
+		PromptVersion: "v1",
+	})
+	assert.NotContains(t, out.SystemPrompt, "上一集剧情")
+}
+
 func TestBuilder_RuneCountRoughlyMatchesDuration(t *testing.T) {
 	b, err := NewBuilder(templatePath)
 	require.NoError(t, err)

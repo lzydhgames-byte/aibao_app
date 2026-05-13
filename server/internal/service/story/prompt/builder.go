@@ -19,7 +19,10 @@ type BuildInput struct {
 	NormalizedIPs            []string
 	NormalizedIPInstructions string // joined whitelist instructions
 	MemorySummary            string // recent story elements (Plan 6)
-	PromptVersion            string // e.g. "v1"
+	StorylineHook            string   // Plan 8: previous episode's next-episode hint
+	StorylineRecentSummaries []string // Plan 8: up to 3 previous episode summaries, newest first
+	EpisodeNumber            int      // Plan 8: the upcoming episode number (>=2 for sequels)
+	PromptVersion            string   // e.g. "v1"
 }
 
 // BuildOutput is the assembled prompt.
@@ -54,6 +57,9 @@ type templateVars struct {
 	TopicText                string
 	NormalizedIPInstructions string
 	MemorySummary            string
+	StorylineHook            string
+	StorylineRecentSummaries []string
+	EpisodeNumber            int
 	PromptVersion            string
 }
 
@@ -70,6 +76,9 @@ func (b *Builder) Build(in BuildInput) BuildOutput {
 		TopicText:                topicText(in.Topic),
 		NormalizedIPInstructions: in.NormalizedIPInstructions,
 		MemorySummary:            in.MemorySummary,
+		StorylineHook:            in.StorylineHook,
+		StorylineRecentSummaries: in.StorylineRecentSummaries,
+		EpisodeNumber:            in.EpisodeNumber,
 		PromptVersion:            in.PromptVersion,
 	}
 	var buf bytes.Buffer
