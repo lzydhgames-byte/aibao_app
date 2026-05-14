@@ -3,6 +3,7 @@ import '../api/api_client.dart';
 import '../api/api_exception.dart';
 import '../api/models/user.dart';
 import '../main.dart' show apiClientProvider;
+import 'child_state.dart' show childProvider;
 
 /// AuthState represents the user's session lifecycle:
 /// - initial: unknown (app just opened, checking persisted token)
@@ -33,8 +34,22 @@ class AuthError extends AuthState {
 
 class AuthNotifier extends StateNotifier<AuthState> {
   final ApiClient _api;
-  AuthNotifier(this._api) : super(const AuthInitial()) {
+  final Ref _ref;
+  AuthNotifier(this._api, this._ref) : super(const AuthInitial()) {
     _bootstrap();
+  }
+
+  /// Invalidate every provider that holds user-scoped state. Called on
+  /// login (new user session may not match previously cached data) and
+  /// logout (clear stale data immediately so login screen doesn't flash
+  /// the previous user's child/storylines).
+  ///
+  /// childProvider is the only one whose state must NOT survive a session
+  /// change. heartbeat/storyList/bootstrap are FutureProvider.family keyed
+  /// on childId so they reset automatically when child.id changes (different
+  /// family key = different provider instance).
+  void _resetUserScopedState() {
+    _ref.invalidate(childProvider);
   }
 
   /// Check persisted token on app start; verify with /me; emit state.
@@ -80,6 +95,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
         code: code,
         nickname: nickname,
       );
+      // Wipe user-scoped caches BEFORE flipping state — otherwise widgets
+      // listening to authProvider may rebuild with the OLD user's child/
+      // storyline data still in childProvider's cache.
+      _resetUserScopedState();
       state = AuthAuthenticated(result.user);
     } on ApiException catch (e) {
       state = AuthError(e.userMsg);
@@ -89,10 +108,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     await _api.logout();
+    _resetUserScopedState();
     state = const AuthUnauthenticated();
   }
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>(
-  (ref) => AuthNotifier(ref.watch(apiClientProvider)),
+  (ref) => AuthNotifier(ref.watch(apiClientProvider), ref),
 );
