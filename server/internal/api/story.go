@@ -38,13 +38,17 @@ func NewStoryHandler(orch *story.Orchestrator, repo StoryQuery, children ChildLo
 	return &StoryHandler{orch: orch, repo: repo, children: children}
 }
 
-// RegisterRoutes mounts /stories/* on an authenticated group.
+// RegisterRoutes mounts /stories/* on an authenticated group. genGuards are
+// applied ONLY to the write/expensive POST /stories/generate route — read
+// endpoints (list, get) must stay outside the per-user rate-limit and budget
+// gates, otherwise opening the player after generating triggers 429s.
 //
 // IMPORTANT: GET /stories MUST be registered BEFORE GET /stories/:id; gin
 // matches routes in registration order and `:id` would otherwise shadow the
 // list endpoint.
-func (h *StoryHandler) RegisterRoutes(g *gin.RouterGroup) {
-	g.POST("/stories/generate", h.generate)
+func (h *StoryHandler) RegisterRoutes(g *gin.RouterGroup, genGuards ...gin.HandlerFunc) {
+	genChain := append(append([]gin.HandlerFunc{}, genGuards...), h.generate)
+	g.POST("/stories/generate", genChain...)
 	g.GET("/stories", h.list)
 	g.GET("/stories/:id", h.get)
 }

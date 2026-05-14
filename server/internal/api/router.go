@@ -85,14 +85,14 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 			deps.Heartbeat.RegisterRoutes(auth)
 		}
 		if deps.Story != nil {
-			gen := auth.Group("")
+			var genGuards []gin.HandlerFunc
 			if deps.GenRateLimit != nil {
-				gen.Use(deps.GenRateLimit)
+				genGuards = append(genGuards, deps.GenRateLimit)
 			}
 			if deps.BudgetGuard != nil {
-				gen.Use(deps.BudgetGuard)
+				genGuards = append(genGuards, deps.BudgetGuard)
 			}
-			deps.Story.RegisterRoutes(gen)
+			deps.Story.RegisterRoutes(auth, genGuards...)
 		}
 	}
 
