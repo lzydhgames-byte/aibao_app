@@ -47,7 +47,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final storyAsync = ref.watch(storyByIdProvider(widget.storyId));
-    final audioAsync = ref.watch(audioUrlPollProvider(widget.storyId));
 
     return Scaffold(
       appBar: AppBar(
@@ -56,10 +55,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
         ),
         title: storyAsync.maybeWhen(
-          data: (s) => Text(
-            s.title.length > 18 ? '${s.title.substring(0, 18)}…' : s.title,
-            overflow: TextOverflow.ellipsis,
-          ),
+          data: (s) {
+            final titleText =
+                s.title.length > 18 ? '${s.title.substring(0, 18)}…' : s.title;
+            final showBadge = s.storylineId != null && s.episodeNo != null;
+            if (!showBadge) {
+              return Text(titleText, overflow: TextOverflow.ellipsis);
+            }
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(titleText, overflow: TextOverflow.ellipsis),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '📖 续集 #${s.episodeNo}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          Theme.of(context).colorScheme.onTertiaryContainer,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
           orElse: () => const Text('故事'),
         ),
       ),
@@ -96,15 +126,25 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: audioAsync.when(
-                loading: () => const _Status('🐼 音频准备中...'),
-                error: (e, _) => _Status('音频加载失败：$e'),
-                data: (resp) => _audioContent(resp),
-              ),
+              child: _audioBar(story.audioStatus),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Fast-fail: if the story payload already shows audio_status=failed,
+  /// skip polling entirely and render the error state.
+  Widget _audioBar(String audioStatus) {
+    if (audioStatus == 'failed') {
+      return _audioContent(AudioFailed(message: '音频生成失败'));
+    }
+    final audioAsync = ref.watch(audioUrlPollProvider(widget.storyId));
+    return audioAsync.when(
+      loading: () => const _Status('🐼 音频准备中...'),
+      error: (e, _) => _Status('音频加载失败：$e'),
+      data: (resp) => _audioContent(resp),
     );
   }
 
