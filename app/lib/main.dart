@@ -22,7 +22,17 @@ final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
     storage: SecureTokenStorage(),
     onUnauthorized: () {
       Future.microtask(() {
-        ref.read(authProvider.notifier).logout();
+        // Only react to 401 if we currently *think* we are authenticated.
+        // Otherwise we create a feedback loop:
+        //   childProvider.build() → GET /children → 401 → logout →
+        //   _resetUserScopedState → invalidate childProvider → re-build → loop.
+        // (Happens during the brief window after pm clear when a widget
+        // accidentally watches childProvider before auth bootstrap finishes
+        // and decides we're unauthenticated.)
+        final auth = ref.read(authProvider);
+        if (auth is AuthAuthenticated) {
+          ref.read(authProvider.notifier).logout();
+        }
       });
     },
   );
