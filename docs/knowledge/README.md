@@ -27,6 +27,7 @@
 | [09-observability.md](09-observability.md) | 结构化日志、TraceID、lumberjack、Prometheus 三类指标、SLO、业务指标、预算熔断、fail-open 必须配指标告警 |
 | [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce、云服务标识符完整名 vs 短名陷阱 |
 | [11-llm-engineering.md](11-llm-engineering.md) | Token、System/User Prompt、Temperature、流式 vs 整体、Fallback、上下文窗口、前缀缓存、火山引擎 Endpoint ID、fail-open vs fail-closed、软提示 vs 硬提示、LLM 顺势调用模式 |
+| [12-flutter.md](12-flutter.md) | Widget 三件套、Riverpod 2.x、dio 拦截器、go_router + Riverpod 桥接、Android 平台配置、ColorOS SELinux NPE、debug vs release |
 
 ---
 
