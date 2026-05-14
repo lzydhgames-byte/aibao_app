@@ -1,7 +1,11 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -27,6 +31,16 @@ type smsSendReq struct {
 }
 
 func (h *AuthHandler) smsSend(c *gin.Context) {
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_argument", "user_msg": "请求参数不合法"})
+		return
+	}
+	if !utf8.Valid(raw) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_nickname", "user_msg": "昵称包含非法字节，请确保为 UTF-8"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
 	var req smsSendReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_argument", "user_msg": "请求参数不合法"})
@@ -46,8 +60,22 @@ type loginOrRegisterReq struct {
 }
 
 func (h *AuthHandler) loginOrRegister(c *gin.Context) {
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_argument", "user_msg": "请求参数不合法"})
+		return
+	}
+	if !utf8.Valid(raw) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_nickname", "user_msg": "昵称包含非法字节，请确保为 UTF-8"})
+		return
+	}
 	var req loginOrRegisterReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := json.Unmarshal(raw, &req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_argument", "user_msg": "请求参数不合法"})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	if req.Phone == "" || req.Code == "" {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_argument", "user_msg": "请求参数不合法"})
 		return
 	}

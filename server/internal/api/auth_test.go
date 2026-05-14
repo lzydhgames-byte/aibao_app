@@ -115,6 +115,26 @@ func TestLoginOrRegister_OK(t *testing.T) {
 	assert.Equal(t, "妈妈", user["nickname"])
 }
 
+func TestLoginOrRegister_RejectsNonUTF8Nickname(t *testing.T) {
+	r, _, _ := setupAuth(t)
+	require.Equal(t, 200, postJSON(r, "/api/v1/auth/sms/send", map[string]string{"phone": "13800138000"}).Code)
+
+	// Build raw body with invalid UTF-8 bytes in nickname (cannot use json.Marshal
+	// which would replace invalid bytes with U+FFFD).
+	prefix := []byte(`{"phone":"13800138000","code":"123456","nickname":"`)
+	invalid := []byte{0xc8, 0xed, 0xa1, 0xa1}
+	suffix := []byte(`"}`)
+	body := append(append(prefix, invalid...), suffix...)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login_or_register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_nickname")
+}
+
 func TestLoginOrRegister_BadCode(t *testing.T) {
 	r, _, _ := setupAuth(t)
 	require.Equal(t, 200, postJSON(r, "/api/v1/auth/sms/send", map[string]string{"phone": "13800138000"}).Code)
