@@ -31,24 +31,28 @@ func startRedis(t *testing.T) *rdb.Client {
 	return rdb.NewClient(&rdb.Options{Addr: host + ":" + port.Port()})
 }
 
-func TestCodeStore_SaveAndTake(t *testing.T) {
+func TestCodeStore_SaveAndPeek(t *testing.T) {
 	cli := startRedis(t)
 	store := NewRedisCodeStore(cli)
 	require.NoError(t, store.Save(context.Background(), "h_a", "123456", time.Minute, 100*time.Millisecond))
 
-	code, err := store.Take(context.Background(), "h_a")
+	code, err := store.Peek(context.Background(), "h_a")
 	require.NoError(t, err)
 	assert.Equal(t, "123456", code)
+
+	// Peek does NOT consume — second Peek still returns the code.
+	code2, err := store.Peek(context.Background(), "h_a")
+	require.NoError(t, err)
+	assert.Equal(t, "123456", code2)
 }
 
-func TestCodeStore_TakeIsOneShot(t *testing.T) {
+func TestCodeStore_ConsumeDeletes(t *testing.T) {
 	cli := startRedis(t)
 	store := NewRedisCodeStore(cli)
 	require.NoError(t, store.Save(context.Background(), "h_b", "123456", time.Minute, 100*time.Millisecond))
 
-	_, err := store.Take(context.Background(), "h_b")
-	require.NoError(t, err)
-	_, err = store.Take(context.Background(), "h_b")
+	require.NoError(t, store.Consume(context.Background(), "h_b"))
+	_, err := store.Peek(context.Background(), "h_b")
 	assert.True(t, errors.Is(err, ErrCodeNotFound))
 }
 

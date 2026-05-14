@@ -21,7 +21,13 @@ type CodeStore interface {
 	// overwriting the existing code.
 	Save(ctx context.Context, phoneHash, code string, codeTTL, cooldown time.Duration) error
 
-	// Take fetches and atomically deletes the code for phoneHash. Returns
-	// ErrCodeNotFound if absent or already taken.
-	Take(ctx context.Context, phoneHash string) (string, error)
+	// Peek returns the code for phoneHash WITHOUT consuming it. Lets the
+	// caller validate the user-supplied code and retry on mismatch within
+	// the codeTTL window. Returns ErrCodeNotFound if absent/expired.
+	Peek(ctx context.Context, phoneHash string) (string, error)
+
+	// Consume atomically deletes the code for phoneHash. Caller invokes
+	// this only after a successful Peek+match — preventing replay of a
+	// validated code while still allowing retry of wrong attempts.
+	Consume(ctx context.Context, phoneHash string) error
 }

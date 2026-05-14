@@ -33,8 +33,8 @@ func (s *redisStore) Save(ctx context.Context, phoneHash, code string, codeTTL, 
 	return nil
 }
 
-func (s *redisStore) Take(ctx context.Context, phoneHash string) (string, error) {
-	got, err := s.c.GetDel(ctx, codeKey(phoneHash)).Result()
+func (s *redisStore) Peek(ctx context.Context, phoneHash string) (string, error) {
+	got, err := s.c.Get(ctx, codeKey(phoneHash)).Result()
 	if errors.Is(err, redis.Nil) {
 		return "", ErrCodeNotFound
 	}
@@ -42,4 +42,9 @@ func (s *redisStore) Take(ctx context.Context, phoneHash string) (string, error)
 		return "", err
 	}
 	return got, nil
+}
+
+func (s *redisStore) Consume(ctx context.Context, phoneHash string) error {
+	// Best-effort delete; if key was already absent (race), no-op.
+	return s.c.Del(ctx, codeKey(phoneHash)).Err()
 }

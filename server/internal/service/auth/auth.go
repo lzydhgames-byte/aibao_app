@@ -101,16 +101,19 @@ func (s *Service) LoginOrRegister(ctx context.Context, phone, code, nickname str
 	}
 	hash := s.d.Hasher.HashString(phone)
 
-	stored, err := s.d.CodeStore.Take(ctx, hash)
+	stored, err := s.d.CodeStore.Peek(ctx, hash)
 	if err != nil {
 		if errors.Is(err, ErrCodeNotFound) {
 			return nil, apperr.New(apperr.CodeUnauthenticated, "code_expired", "验证码已过期，请重新获取")
 		}
-		return nil, apperr.Wrap(err, apperr.CodeInternal, "code_take_failed", "验证失败")
+		return nil, apperr.Wrap(err, apperr.CodeInternal, "code_peek_failed", "验证失败")
 	}
 	if stored != code {
 		return nil, apperr.New(apperr.CodeUnauthenticated, "code_mismatch", "验证码错误")
 	}
+	// Only consume after a successful match — wrong attempts within TTL
+	// must remain retryable instead of forcing the user to request a new code.
+	_ = s.d.CodeStore.Consume(ctx, hash)
 
 	enc, err := s.d.PhoneCipher.Encrypt(phone)
 	if err != nil {

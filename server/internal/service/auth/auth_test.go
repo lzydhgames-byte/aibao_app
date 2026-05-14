@@ -58,13 +58,16 @@ func (f *fakeCodeStore) Save(_ context.Context, ph, code string, _, _ time.Durat
 	f.saved[ph] = code
 	return nil
 }
-func (f *fakeCodeStore) Take(_ context.Context, ph string) (string, error) {
+func (f *fakeCodeStore) Peek(_ context.Context, ph string) (string, error) {
 	c, ok := f.saved[ph]
 	if !ok {
 		return "", ErrCodeNotFound
 	}
-	delete(f.saved, ph)
 	return c, nil
+}
+func (f *fakeCodeStore) Consume(_ context.Context, ph string) error {
+	delete(f.saved, ph)
+	return nil
 }
 
 type fakeSMS struct {
