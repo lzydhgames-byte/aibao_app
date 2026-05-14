@@ -57,7 +57,7 @@ tts:
   provider: minimax
   base_url: https://api.minimax.chat
   model: speech-01-turbo
-  voice_id: female-tianmei  # TBD: confirm via Minimax console; default to a Chinese children-friendly voice
+  voice_id: audiobook_female_1  # Final pick after A/B between tianmei/audiobook_1/audiobook_2/presenter
   format: mp3
   sample_rate: 32000
   bitrate: 128000
