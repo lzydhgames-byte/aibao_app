@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../api/models/story.dart';
 import '../state/child_state.dart';
+import '../state/story_list_state.dart';
 import '../state/story_state.dart';
 import '../widgets/duration_chips.dart';
 import '../widgets/style_dropdown.dart';
@@ -83,6 +84,11 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
       final story = await showWaitingAibao<Story>(context, future);
       if (!mounted) return;
       if (story != null) {
+        // Bust the home "最近听过" cache so the newly generated story
+        // shows up when the user navigates back. storyListProvider is a
+        // FutureProvider.family — without this invalidate it keeps the
+        // pre-generation snapshot and silently loses the new entry.
+        ref.invalidate(storyListProvider(child.id));
         context.go('/player/${story.id}');
       }
     } catch (e) {
