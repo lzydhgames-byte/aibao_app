@@ -150,39 +150,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   prefixIcon: Icon(Icons.phone_android),
                 ),
               ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: canSend ? _sendCode : null,
+                  icon: const Icon(Icons.sms_outlined),
+                  label: Text(
+                    _sending
+                        ? '发送中...'
+                        : _countdown > 0
+                            ? '${_countdown}s 后可重发'
+                            : '发送验证码',
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _code,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(6),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: '验证码',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.sms),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    height: 56,
-                    child: FilledButton.tonal(
-                      onPressed: canSend ? _sendCode : null,
-                      child: Text(
-                        _sending
-                            ? '发送中...'
-                            : _countdown > 0
-                                ? '${_countdown}s'
-                                : '发送验证码',
-                      ),
-                    ),
-                  ),
+              TextField(
+                controller: _code,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
                 ],
+                decoration: const InputDecoration(
+                  labelText: '验证码（6 位）',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.password),
+                ),
               ),
               const SizedBox(height: 32),
               SizedBox(
