@@ -8,11 +8,15 @@ import 'token_storage.dart';
 import 'models/user.dart';
 import 'models/child.dart';
 import 'models/story.dart';
+import 'models/story_list_item.dart';
 import 'models/audio_url.dart';
+import 'models/heartbeat.dart';
+import 'models/bootstrap.dart';
 
 class ApiClient {
   final Dio _dio;
   final TokenStorage _storage;
+  final void Function()? _onUnauthorized;
 
   ApiClient({
     required TokenStorage storage,
@@ -20,6 +24,9 @@ class ApiClient {
     // 127.0.0.1:8080 → host PC. AVD-only builds can override to 10.0.2.2.
     String baseUrl = 'http://127.0.0.1:8080',
     Dio? dio,
+    // Plan 9b: invoked when a non-/auth response is 401 (token rejected).
+    // Wire to authProvider.logout to bounce user back to /login.
+    void Function()? onUnauthorized,
   })  : _dio = dio ??
             Dio(BaseOptions(
               baseUrl: '$baseUrl/api/v1',
@@ -28,7 +35,12 @@ class ApiClient {
               headers: {'Content-Type': 'application/json; charset=utf-8'},
               validateStatus: (status) => status != null && status < 600,
             )),
-        _storage = storage {
+        _storage = storage,
+        _onUnauthorized = onUnauthorized {
+    // Order matters (Plan 9b 12-flutter.md entry):
+    //   - request interceptors run in add order  (JWT inject first)
+    //   - response interceptors run in REVERSE order (401 catcher runs first
+    //     on the way back, after dio has the response)
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         final path = options.path;
@@ -39,6 +51,20 @@ class ApiClient {
           }
         }
         return handler.next(options);
+      },
+    ));
+
+    // Plan 9b: 401 catcher with /auth/* whitelist. Login itself returning 401
+    // (e.g. wrong SMS code) must NOT bounce — user is already on /login.
+    _dio.interceptors.add(InterceptorsWrapper(
+      onResponse: (response, handler) {
+        if (response.statusCode == 401) {
+          final path = response.requestOptions.path;
+          if (!path.startsWith('/auth/')) {
+            _onUnauthorized?.call();
+          }
+        }
+        handler.next(response);
       },
     ));
   }
@@ -117,16 +143,68 @@ class ApiClient {
     required int duration,
     required String style,
     String topic = '',
+    // Plan 8 storyline support. Mutually exclusive — server returns 400 if both set.
+    bool startStoryline = false,
+    int? storylineId,
   }) async {
-    final r = await _dio.post('/stories/generate', data: {
+    final body = <String, dynamic>{
       'child_id': childId,
       'prompt': prompt,
       'duration': duration,
       'style': style,
       'topic': topic,
-    });
+    };
+    if (startStoryline) body['start_storyline'] = true;
+    if (storylineId != null) body['storyline_id'] = storylineId;
+    final r = await _dio.post('/stories/generate', data: body);
     _ensureSuccess(r);
     return Story.fromJson(r.data as Map<String, dynamic>);
+  }
+
+  /// Plan 9b: list recent stories for a child, newest first (server caps to 50).
+  Future<List<StoryListItem>> listStories(int childId, {int limit = 5}) async {
+    final r = await _dio.get(
+      '/stories',
+      queryParameters: {'child_id': childId, 'limit': limit},
+    );
+    _ensureSuccess(r);
+    final items = (r.data['items'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
+    return items.map(StoryListItem.fromJson).toList();
+  }
+
+  /// Plan 9b: time-aware greeting + active storylines (Plan 8 backend).
+  Future<HeartbeatResponse> getHeartbeat(int childId) async {
+    final r = await _dio.get(
+      '/heartbeat',
+      queryParameters: {'child_id': childId},
+    );
+    _ensureSuccess(r);
+    return HeartbeatResponse.fromJson(r.data as Map<String, dynamic>);
+  }
+
+  /// Plan 9b: load the 7-question BOOTSTRAP form schema.
+  Future<List<BootstrapQuestion>> getBootstrapQuestions() async {
+    final r = await _dio.get('/bootstrap/questions');
+    _ensureSuccess(r);
+    final items = (r.data['questions'] as List? ?? const [])
+        .cast<Map<String, dynamic>>();
+    return items.map(BootstrapQuestion.fromJson).toList();
+  }
+
+  /// Plan 9b: submit BOOTSTRAP answers. Returns the rendered profile
+  /// description (may be empty if upstream LLM was unavailable — fail-open
+  /// per Plan 6 / 6b).
+  Future<String> submitBootstrapAnswers({
+    required int childId,
+    required List<BootstrapAnswer> answers,
+  }) async {
+    final r = await _dio.post('/bootstrap/answers', data: {
+      'child_id': childId,
+      'answers': answers.map((a) => a.toJson()).toList(),
+    });
+    _ensureSuccess(r);
+    return (r.data['description'] as String?) ?? '';
   }
 
   Future<Story> getStory(int id) async {
