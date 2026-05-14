@@ -11,7 +11,11 @@ import '../widgets/waiting_aibao.dart';
 
 /// Plan 9-A "tell me a story today" composer.
 class GenerateScreen extends ConsumerStatefulWidget {
-  const GenerateScreen({super.key});
+  /// When non-null, this screen runs in sequel mode and posts
+  /// `storyline_id` to /stories/generate. Plan 9b does NOT support
+  /// starting a brand-new storyline from this screen (deferred to 9c).
+  final int? storylineId;
+  const GenerateScreen({super.key, this.storylineId});
 
   @override
   ConsumerState<GenerateScreen> createState() => _GenerateScreenState();
@@ -23,6 +27,14 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
   int _duration = 5;
   String _style = kStyleOptions.first;
   bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.storylineId != null) {
+      _promptCtrl.text = '继续之前的剧情';
+    }
+  }
 
   @override
   void dispose() {
@@ -66,6 +78,7 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
             duration: _duration,
             style: _style,
             topic: _topicCtrl.text.trim(),
+            storylineId: widget.storylineId,
           );
       final story = await showWaitingAibao<Story>(context, future);
       if (!mounted) return;
@@ -86,9 +99,12 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isSequel = widget.storylineId != null;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('今天的故事'),
+        title: Text(
+          isSequel ? '续集 (storyline #${widget.storylineId})' : '今天的故事',
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.canPop() ? context.pop() : context.go('/'),
@@ -120,6 +136,27 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
                           border: OutlineInputBorder(),
                         ),
                       ),
+                      if (isSequel) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .secondaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '📖 这是上一集的续集，故事会承接之前的角色和情节',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSecondaryContainer,
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       const Text(
                         '时长',

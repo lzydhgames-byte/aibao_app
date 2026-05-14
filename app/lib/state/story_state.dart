@@ -17,6 +17,8 @@ class StoryGenerationNotifier extends AsyncNotifier<Story?> {
     required int duration,
     required String style,
     String topic = '',
+    bool startStoryline = false,
+    int? storylineId,
   }) async {
     state = const AsyncValue.loading();
     final api = ref.read(apiClientProvider);
@@ -27,6 +29,8 @@ class StoryGenerationNotifier extends AsyncNotifier<Story?> {
         duration: duration,
         style: style,
         topic: topic,
+        startStoryline: startStoryline,
+        storylineId: storylineId,
       );
       state = AsyncValue.data(story);
       return story;
