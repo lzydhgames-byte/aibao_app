@@ -35,7 +35,10 @@ llm:
   story_model: ep-m-20260318190252-2rxkc   # Doubao-1.5-pro-32k endpoint
   intent_model: ep-20260511153638-cstj9     # Doubao-1.5-lite-32k endpoint (text classification + summary + profile)
   base_url: https://ark.cn-beijing.volces.com/api/v3
-  timeout_seconds: 30
+  # Plan 9c: bumped 30 → 90 to cover larger generations (5min slot now
+  # asks for ~1500 chars; 15min asks for ~4800). Doubao p99 grows linearly
+  # with output length. Keep < client dio receiveTimeout (120s).
+  timeout_seconds: 90
   max_retries: 1
   story_temperature: 0.8
   intent_temperature: 0
