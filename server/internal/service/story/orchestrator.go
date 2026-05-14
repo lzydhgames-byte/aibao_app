@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -227,6 +228,43 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		lg.Warn("story.llm.attempt_failed", "attempt", attempt, "err", err.Error())
 		if attempt == 1 {
 			llmFailed = true
+		}
+	}
+
+	// Length guard: Doubao routinely under-writes (observed 600-700 chars
+	// for a 1400-1600 target). If the first output is below 70% of the
+	// minimum, ask the LLM to rewrite with an explicit '上次只写了 X 字，
+	// 太短' steer. Costs one extra LLM call when triggered; capped at
+	// one rewrite so the user-visible latency stays bounded.
+	if !llmFailed {
+		rmin, _ := prompt.ExpectedRuneBand(p.Duration)
+		got := prompt.CountCJKRunes(llmText)
+		threshold := rmin * 7 / 10
+		if got < threshold {
+			lg.Warn("story.length.too_short", "got", got, "expected_min", rmin, "threshold", threshold)
+			retryUser := fmt.Sprintf(
+				"%s\n\n【重要】上次你只写了大约 %d 个汉字，远低于要求的 %d–%d 字硬约束。请重新创作一个完整的故事，必须超过 %d 个汉字。通过增加细节描写、对话、孩子的内心活动、场景刻画来扩展，不要省略情节。",
+				po.UserPrompt, got, rmin, rmin*11/9, rmin,
+			)
+			resp, err := o.d.LLM.Generate(ctx, llm.GenerateRequest{
+				Model:       o.d.StoryModel,
+				Messages:    []llm.Message{{Role: "system", Content: po.SystemPrompt}, {Role: "user", Content: retryUser}},
+				Temperature: o.d.Temperature,
+			})
+			if err == nil {
+				newGot := prompt.CountCJKRunes(resp.Text)
+				lg.Info("story.length.retry_done", "old", got, "new", newGot, "expected_min", rmin)
+				// Only swap if the rewrite is actually longer — defensive
+				// against a worse second roll.
+				if newGot > got {
+					llmText = resp.Text
+					llmInTok += resp.InputTokens
+					llmOutTok += resp.OutputTokens
+					_ = o.d.Budget.Record(ctx, resp.InputTokens, resp.OutputTokens)
+				}
+			} else {
+				lg.Warn("story.length.retry_failed", "err", err.Error())
+			}
 		}
 	}
 

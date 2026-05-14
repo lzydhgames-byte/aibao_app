@@ -54,3 +54,34 @@ func expectedRuneBand(durationMin int) (int, int) {
 	c := expectedRunesForDuration(durationMin)
 	return c * 9 / 10, c * 11 / 10
 }
+
+// ExpectedRuneBand exposes expectedRuneBand for callers outside this
+// package (e.g. the story orchestrator's length-retry guard).
+func ExpectedRuneBand(durationMin int) (int, int) { return expectedRuneBand(durationMin) }
+
+// CountCJKRunes counts the number of CJK ideographs in s, ignoring
+// punctuation, whitespace and [音效:xxx] / [BGM情绪:xxx] cue markers.
+// Used by the orchestrator's length guard to decide whether to ask the
+// LLM to rewrite a too-short story.
+func CountCJKRunes(s string) int {
+	n := 0
+	inBracket := false
+	for _, r := range s {
+		if r == '[' {
+			inBracket = true
+			continue
+		}
+		if r == ']' {
+			inBracket = false
+			continue
+		}
+		if inBracket {
+			continue
+		}
+		// Common CJK Unified Ideographs block.
+		if r >= 0x4E00 && r <= 0x9FFF {
+			n++
+		}
+	}
+	return n
+}
