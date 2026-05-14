@@ -53,6 +53,8 @@ type templateVars struct {
 	FearListText             string
 	Duration                 int
 	ExpectedRunes            int
+	ExpectedRunesMin         int
+	ExpectedRunesMax         int
 	Style                    string
 	TopicText                string
 	NormalizedIPInstructions string
@@ -65,6 +67,7 @@ type templateVars struct {
 
 // Build renders the system prompt and returns it together with the cleaned user prompt.
 func (b *Builder) Build(in BuildInput) BuildOutput {
+	rmin, rmax := expectedRuneBand(in.Duration)
 	vars := templateVars{
 		ChildNickname:            in.ChildNickname,
 		ChildAgeYears:            in.ChildAgeYears,
@@ -72,6 +75,8 @@ func (b *Builder) Build(in BuildInput) BuildOutput {
 		FearListText:             fearListText(in.ChildFearList),
 		Duration:                 in.Duration,
 		ExpectedRunes:            expectedRunesForDuration(in.Duration),
+		ExpectedRunesMin:         rmin,
+		ExpectedRunesMax:         rmax,
 		Style:                    in.Style,
 		TopicText:                topicText(in.Topic),
 		NormalizedIPInstructions: in.NormalizedIPInstructions,

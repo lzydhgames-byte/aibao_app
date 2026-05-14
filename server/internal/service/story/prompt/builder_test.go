@@ -215,8 +215,10 @@ func TestBuilder_RuneCountRoughlyMatchesDuration(t *testing.T) {
 			Style:         "温馨治愈",
 			PromptVersion: "v1",
 		})
-		expected := dur * 120
-		assert.Contains(t, out.SystemPrompt, fmt.Sprintf("约 %d 字", expected),
-			"duration=%d minutes should map to about %d runes", dur, expected)
+		center := dur * 320
+		rmin := center * 9 / 10
+		rmax := center * 11 / 10
+		assert.Contains(t, out.SystemPrompt, fmt.Sprintf("%d–%d 个汉字", rmin, rmax),
+			"duration=%d minutes should render the [%d, %d] hard range", dur, rmin, rmax)
 	}
 }

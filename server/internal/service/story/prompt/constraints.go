@@ -38,7 +38,19 @@ func topicText(t string) string {
 }
 
 // expectedRunesForDuration approximates the target story length in CJK
-// characters. 120 chars/minute is a rough TTS-friendly pace.
+// characters. Calibrated against real Minimax t2a_v2 (audiobook_female_1)
+// output: ~300 chars/min observed; we target 320 chars/min so the LLM
+// slightly over-writes rather than under-fills the audio window.
+//
+// Returns the CENTER of the target band; the prompt template renders a
+// ±10% window around this value as a hard constraint.
 func expectedRunesForDuration(durationMin int) int {
-	return durationMin * 120
+	return durationMin * 320
+}
+
+// expectedRuneBand returns the inclusive [min, max] rune range the LLM
+// must hit, computed as ±10% around expectedRunesForDuration.
+func expectedRuneBand(durationMin int) (int, int) {
+	c := expectedRunesForDuration(durationMin)
+	return c * 9 / 10, c * 11 / 10
 }
