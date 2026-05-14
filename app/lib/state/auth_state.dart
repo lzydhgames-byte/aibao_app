@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
 import '../api/api_exception.dart';
 import '../api/models/user.dart';
-import '../main.dart' show apiClientProvider;
+import '../main.dart' show apiClientProvider, authSnapshotProvider;
 import 'child_state.dart' show childProvider;
 
 /// AuthState represents the user's session lifecycle:
@@ -37,6 +37,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final Ref _ref;
   AuthNotifier(this._api, this._ref) : super(const AuthInitial()) {
     _bootstrap();
+  }
+
+  /// Mirror state transitions into [authSnapshotProvider] so the
+  /// apiClientProvider's 401 interceptor can synchronously decide whether
+  /// to bounce the user — WITHOUT calling ref.read(authProvider) inside
+  /// apiClientProvider (which would create a real circular dependency at
+  /// construction time: apiClient → authProvider → AuthNotifier needs api).
+  @override
+  set state(AuthState value) {
+    super.state = value;
+    _ref.read(authSnapshotProvider).isAuthenticated = value is AuthAuthenticated;
   }
 
   /// Invalidate every provider that holds user-scoped state. Called on

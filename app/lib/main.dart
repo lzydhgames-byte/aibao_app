@@ -17,7 +17,19 @@ import 'theme.dart';
 ///      synchronously mutating Riverpod state from there can racily
 ///      reenter the same request stack on some platforms;
 ///   2. it gives go_router's redirect listener a clean tick to re-evaluate.
+/// Mutable cell tracking the latest auth state. Updated by AuthNotifier on
+/// every state transition (see auth_state.dart). The 401 interceptor reads
+/// this synchronously WITHOUT going through Riverpod — avoiding circular
+/// dependency between apiClientProvider and authProvider at construction
+/// time (authProvider's notifier itself depends on apiClientProvider).
+class AuthSnapshot {
+  bool isAuthenticated = false;
+}
+
+final authSnapshotProvider = Provider<AuthSnapshot>((_) => AuthSnapshot());
+
 final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
+  final snapshot = ref.read(authSnapshotProvider);
   return ApiClient(
     storage: SecureTokenStorage(),
     onUnauthorized: () {
@@ -25,14 +37,12 @@ final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
         // Only react to 401 if we currently *think* we are authenticated.
         // Otherwise we create a feedback loop:
         //   childProvider.build() → GET /children → 401 → logout →
-        //   _resetUserScopedState → invalidate childProvider → re-build → loop.
-        // (Happens during the brief window after pm clear when a widget
-        // accidentally watches childProvider before auth bootstrap finishes
-        // and decides we're unauthenticated.)
-        final auth = ref.read(authProvider);
-        if (auth is AuthAuthenticated) {
-          ref.read(authProvider.notifier).logout();
-        }
+        //   invalidate childProvider → re-build → loop.
+        if (!snapshot.isAuthenticated) return;
+        // Looking up the notifier here is safe because by the time a 401
+        // fires for a non-/auth path, authProvider has already been built
+        // (it built apiClientProvider's lazy dep tree on app start).
+        ref.read(authProvider.notifier).logout();
       });
     },
   );
