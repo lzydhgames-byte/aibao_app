@@ -453,10 +453,11 @@ func TestGenerate_BothStartAndContinue_400(t *testing.T) {
 	assert.Equal(t, apperr.CodeInvalidArgument, ae.Code)
 }
 
-func TestGenerate_PostCheckNotContinuing_FallsbackWithNullStorylineID(t *testing.T) {
+func TestGenerate_PostCheckNotContinuing_ShipsLLMTextAnyway(t *testing.T) {
+	// Plan 9c: continuity miss is now a soft signal — we ship the LLM
+	// output instead of falling back to a 150-char canned template, which
+	// would otherwise produce ~45-second audio for any duration slot.
 	mock := llm.NewMock()
-	// LLM text does NOT mention 小恐龙 → PostCheck not_continuing triggers.
-	// Use a string that also fails on retry (mock returns same text both times).
 	mock.Response.Text = "小宇看到一只小猫。爱宝跟着小宇。小宇说我们走。"
 	bld := &fakeCtxBuilder{out: &StorylineContext{
 		StorylineID: 99, ChildID: 7, EpisodeNumber: 3,
@@ -471,10 +472,11 @@ func TestGenerate_PostCheckNotContinuing_FallsbackWithNullStorylineID(t *testing
 		Duration: 5, Style: "温馨治愈", StorylineID: &slID,
 	})
 	require.NoError(t, err)
-	assert.Nil(t, out.StorylineID)
-	assert.Nil(t, out.EpisodeNo)
-	assert.Equal(t, 0, slRepo.incCalls)
-	assert.Equal(t, "fallback", repo.created.LLMModel)
+	// Storyline still progresses with the LLM text — not nulled out.
+	assert.NotNil(t, out.StorylineID)
+	assert.NotNil(t, out.EpisodeNo)
+	assert.Equal(t, 1, slRepo.incCalls)
+	assert.NotEqual(t, "fallback", repo.created.LLMModel)
 }
 
 func TestGenerate_ChapterHookFails_StoryStillShipsHintEmpty(t *testing.T) {

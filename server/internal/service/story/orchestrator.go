@@ -283,7 +283,14 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		postOut := o.d.PostCheck.Check(postIn)
 		if !postOut.Pass {
 			lg.Warn("story.postcheck.fail", "reason", postOut.RejectReason, "rule", postOut.MatchedRule)
-			llmFailed = true
+			// Continuity miss is a soft signal — we'd rather ship a slightly
+			// disconnected sequel than fall back to a 150-char canned template
+			// (observed Plan 9c: 3min slot fell back to a 45-second audio).
+			// All other PostCheck reasons (safety / child-not-protagonist /
+			// fear-list hit) remain hard fails.
+			if postOut.RejectReason != model.PostCheckReasonNotContinuing {
+				llmFailed = true
+			}
 		}
 	}
 
