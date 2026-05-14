@@ -31,6 +31,10 @@ type StoryRepo interface {
 	// ordered by episode_no DESC (most recent episode first).
 	RecentByStoryline(ctx context.Context, storylineID int64, limit int) ([]*model.Story, error)
 
+	// ListByChild returns up to limit recent stories for a child, ordered created_at DESC.
+	// Used by GET /stories list endpoint (Plan 9b).
+	ListByChild(ctx context.Context, childID int64, limit int) ([]*model.Story, error)
+
 	// ElementsByStory returns story_elements for the given story id filtered by
 	// element_type IN types (e.g. {"character","place"}), ordered by recall_weight DESC.
 	ElementsByStory(ctx context.Context, storyID int64, types []string, limit int) ([]*model.StoryElement, error)
@@ -108,6 +112,19 @@ func (r *storyRepo) RecentByStoryline(ctx context.Context, storylineID int64, li
 	err := r.db.WithContext(ctx).
 		Where("storyline_id = ?", storylineID).
 		Order("episode_no DESC").
+		Limit(limit).
+		Find(&out).Error
+	return out, err
+}
+
+func (r *storyRepo) ListByChild(ctx context.Context, childID int64, limit int) ([]*model.Story, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	var out []*model.Story
+	err := r.db.WithContext(ctx).
+		Where("child_id = ?", childID).
+		Order("created_at DESC").
 		Limit(limit).
 		Find(&out).Error
 	return out, err

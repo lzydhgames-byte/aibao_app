@@ -296,7 +296,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init orchestrator: %w", err)
 	}
-	storyHandler := api.NewStoryHandler(orch, storyRepo)
+	storyHandler := api.NewStoryHandler(orch, storyRepo, childRepo)
 
 	audioHandler := api.NewAudioHandler(
 		storyRepo, childRepo, storageClient,

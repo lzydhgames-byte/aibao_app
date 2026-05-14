@@ -207,6 +207,59 @@ func TestStoryRepo_ElementsByStory_OrderedByWeightDesc(t *testing.T) {
 	assert.Equal(t, "竹林", got[2].Name)
 }
 
+func TestStoryRepo_ListByChild_OrderedByCreatedAtDesc(t *testing.T) {
+	pg, cfg := startPG(t)
+	defer func() { _ = pg.Terminate(context.Background()) }()
+	db, err := NewDB(cfg)
+	require.NoError(t, err)
+	require.NoError(t, autoMigrateForTest(db))
+	defer Close(db)
+
+	ctx := context.Background()
+	urepo := NewUserRepo(db)
+	crepo := NewChildRepo(db)
+	srepo := NewStoryRepo(db)
+
+	u, _, err := urepo.CreateOrGet(ctx, &model.User{PhoneHash: "h_lbc", PhoneEncrypted: []byte{1}, Nickname: "n"})
+	require.NoError(t, err)
+	bday, _ := time.Parse("2006-01-02", "2020-08-15")
+	childA := &model.Child{UserID: u.ID, Nickname: "A", Gender: "boy", Birthday: bday, Profile: []byte(`{}`)}
+	require.NoError(t, crepo.Create(ctx, childA))
+
+	u2, _, err := urepo.CreateOrGet(ctx, &model.User{PhoneHash: "h_lbc2", PhoneEncrypted: []byte{2}, Nickname: "n2"})
+	require.NoError(t, err)
+	childB := &model.Child{UserID: u2.ID, Nickname: "B", Gender: "girl", Birthday: bday, Profile: []byte(`{}`)}
+	require.NoError(t, crepo.Create(ctx, childB))
+
+	for i := 0; i < 3; i++ {
+		s := &model.Story{
+			ChildID: childA.ID, Title: "A", TextContent: "x", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1",
+		}
+		require.NoError(t, srepo.CreateWithOutbox(ctx, s, nil, []*model.OutboxEvent{{
+			EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
+		}}))
+		time.Sleep(10 * time.Millisecond)
+	}
+	sB := &model.Story{ChildID: childB.ID, Title: "B", TextContent: "y", DurationMinutes: 10, Style: "温馨治愈", PromptVersion: "v1"}
+	require.NoError(t, srepo.CreateWithOutbox(ctx, sB, nil, []*model.OutboxEvent{{
+		EventType: model.EventTypeMemoryUpdate, Payload: []byte(`{}`), Status: model.OutboxStatusPending,
+	}}))
+
+	list, err := srepo.ListByChild(ctx, childA.ID, 5)
+	require.NoError(t, err)
+	require.Len(t, list, 3)
+	assert.True(t, !list[0].CreatedAt.Before(list[1].CreatedAt))
+	assert.True(t, !list[1].CreatedAt.Before(list[2].CreatedAt))
+}
+
+func TestStoryRepo_ListByChild_UnknownChildEmpty(t *testing.T) {
+	_, _, srepo, _, cleanup := setupStoryRepo(t)
+	defer cleanup()
+	list, err := srepo.ListByChild(context.Background(), 999999, 5)
+	require.NoError(t, err)
+	assert.Empty(t, list)
+}
+
 func TestStoryRepo_RecentByStoryline_EmptyOk(t *testing.T) {
 	_, _, srepo, _, cleanup := setupStoryRepo(t)
 	defer cleanup()

@@ -22,7 +22,8 @@ import (
 )
 
 type fakeStoryRepo struct {
-	last *model.Story
+	last  *model.Story
+	items []*model.Story
 }
 
 func (f *fakeStoryRepo) CreateWithOutbox(_ context.Context, s *model.Story, _ []*model.StoryElement, evs []*model.OutboxEvent) error {
@@ -40,12 +41,35 @@ func (f *fakeStoryRepo) FindByID(_ context.Context, id int64) (*model.Story, err
 	}
 	return nil, errors.New("not found")
 }
+func (f *fakeStoryRepo) ListByChild(_ context.Context, childID int64, limit int) ([]*model.Story, error) {
+	out := make([]*model.Story, 0)
+	for _, s := range f.items {
+		if s.ChildID == childID {
+			out = append(out, s)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, nil
+}
 
-type fakeChildRepo struct{}
+type fakeChildRepo struct {
+	otherOwner map[int64]int64 // childID -> userID override (default 7)
+}
 
-func (fakeChildRepo) FindByID(_ context.Context, id int64) (*model.Child, error) {
+func (f fakeChildRepo) FindByID(_ context.Context, id int64) (*model.Child, error) {
 	bday, _ := time.Parse("2006-01-02", "2020-08-15")
-	return &model.Child{ID: id, UserID: 7, Nickname: "小宇", Gender: "boy", Birthday: bday, Profile: []byte(`{}`)}, nil
+	uid := int64(7)
+	if f.otherOwner != nil {
+		if v, ok := f.otherOwner[id]; ok {
+			uid = v
+		}
+	}
+	if id == 0 {
+		return nil, errors.New("not found")
+	}
+	return &model.Child{ID: id, UserID: uid, Nickname: "小宇", Gender: "boy", Birthday: bday, Profile: []byte(`{}`)}, nil
 }
 
 type allowBudget struct{}
@@ -57,11 +81,12 @@ func setupStoryHandler(t *testing.T) (*gin.Engine, *fakeStoryRepo) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	srepo := &fakeStoryRepo{}
+	crepo := fakeChildRepo{}
 	mock := llm.NewMock()
 	mock.Response.Text = "小宇推开门，决定走进竹林。爱宝跟着小宇。小宇说我们走吧。小宇带头前进。"
 	rs := &safety.RuleSet{AllRedlinesFlat: []string{"血腥"}, Redlines: map[string][]string{"violence": {"血腥"}}}
 	orch, err := story.NewOrchestrator(story.Deps{
-		Stories: srepo, Children: fakeChildRepo{}, LLM: mock,
+		Stories: srepo, Children: crepo, LLM: mock,
 		Budget:        allowBudget{},
 		PreCheck:      safety.NewPreChecker(rs, safety.NewNoopIntentProvider()),
 		PostCheck:     safety.NewPostChecker(rs),
@@ -79,7 +104,7 @@ func setupStoryHandler(t *testing.T) (*gin.Engine, *fakeStoryRepo) {
 		c.Next()
 	})
 	v1 := r.Group("/api/v1")
-	NewStoryHandler(orch, srepo).RegisterRoutes(v1)
+	NewStoryHandler(orch, srepo, crepo).RegisterRoutes(v1)
 	return r, srepo
 }
 
@@ -163,6 +188,83 @@ func TestGenerate_Response_IncludesStorylineFields(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
 	assert.Equal(t, float64(77), out["storyline_id"])
 	assert.Equal(t, float64(3), out["episode_no"])
+}
+
+func TestList_OK(t *testing.T) {
+	r, repo := setupStoryHandler(t)
+	repo.items = []*model.Story{
+		{ID: 1, ChildID: 1, Title: "A", TextContent: "x", AudioStatus: model.AudioStatusPending, DurationMinutes: 5, Style: "温馨治愈"},
+		{ID: 2, ChildID: 1, Title: "B", TextContent: "y", AudioStatus: model.AudioStatusReady, DurationMinutes: 10, Style: "温馨治愈"},
+		{ID: 3, ChildID: 2, Title: "C", TextContent: "z", AudioStatus: model.AudioStatusPending, DurationMinutes: 5, Style: "温馨治愈"},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stories?child_id=1", nil)
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	items := out["items"].([]any)
+	assert.Len(t, items, 2)
+}
+
+func TestList_MissingChildID_400(t *testing.T) {
+	r, _ := setupStoryHandler(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stories", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "missing_child_id")
+}
+
+func TestList_NotOwner_403(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	srepo := &fakeStoryRepo{}
+	crepo := fakeChildRepo{otherOwner: map[int64]int64{42: 999}}
+	mock := llm.NewMock()
+	rs := &safety.RuleSet{AllRedlinesFlat: []string{}, Redlines: map[string][]string{}}
+	orch, err := story.NewOrchestrator(story.Deps{
+		Stories: srepo, Children: crepo, LLM: mock,
+		Budget:        allowBudget{},
+		PreCheck:      safety.NewPreChecker(rs, safety.NewNoopIntentProvider()),
+		PostCheck:     safety.NewPostChecker(rs),
+		PromptTmpl:    "../../safety/system_prompt.tmpl",
+		FallbackDir:   "../../safety/fallback_stories",
+		StoryModel:    "doubao-1.5-pro-32k",
+		Temperature:   0.8,
+		PromptVersion: "v1",
+	})
+	require.NoError(t, err)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(userctx.WithUserID(c.Request.Context(), 7))
+		c.Next()
+	})
+	v1 := r.Group("/api/v1")
+	NewStoryHandler(orch, srepo, crepo).RegisterRoutes(v1)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stories?child_id=42", nil)
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestList_LimitCapped(t *testing.T) {
+	r, repo := setupStoryHandler(t)
+	// Seed 60 stories — verify response items <= 50.
+	for i := 1; i <= 60; i++ {
+		repo.items = append(repo.items, &model.Story{
+			ID: int64(i), ChildID: 1, Title: "T", TextContent: "x",
+			AudioStatus: model.AudioStatusPending, DurationMinutes: 5, Style: "温馨治愈",
+		})
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stories?child_id=1&limit=999", nil)
+	r.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	items := out["items"].([]any)
+	assert.Len(t, items, 50)
 }
 
 func TestStoryHandler_Get_OK(t *testing.T) {
