@@ -131,3 +131,35 @@ llm_budget_used_yuan                # 今日预算消耗
 **类比**：办公楼火警系统——「火灾时电梯不停留」（fail-open 让人能跑）是必须的，但如果烟感传感器全坏了你没指标看到，等真火灾时就来不及了。
 
 **Plan 6b 落地**：Plan 4 埋的"intent endpoint 绑了文生图模型"bug 沉默 2 个 plan 才暴露，根因就是没指标。Plan 6b 在 3 个 fail-open 点（intent_llm / memory.Summarizer / bootstrap.renderDescription）都接入了 `llm_fail_fallback_total{provider,model,reason}` counter。**坑**：Prometheus `CounterVec` 在第一次 `.Inc()` 前**不会出现在 /metrics 输出里**——这是设计哲学（label 组合无穷可能，不能预先全枚举）。所以 dashboard 上"看不到曲线"≠ "未注册"——必须等业务真触发一次 fail-open。**生产实践**：组件启动时显式 `.WithLabelValues("doubao","ep-XX","upstream_error").Add(0)` 一次，让指标提前曝光为 0 行，方便告警规则写"过 0.05/秒"。
+
+## 9.15 嵌套超时栈的诊断：错误信息往往指向**外层**而非真正凶手
+
+🎓 跨进程 / 跨服务调用栈里每层都有自己的 timeout，**报错信息只反映你这一层的视角**，未必是真正瓶颈。
+
+**爱宝活案例**：
+```
+dio (App) ─[120s receiveTimeout]─→ Backend ─[60s总耗时]─→ LLM Gateway ─[30s call timeout]─→ Doubao
+                                                                ↑
+                                                            真正瓶颈
+```
+
+字数翻倍后 Doubao 单次调用从 20s 涨到 60s。LLM Gateway 30s 超时被打爆 → orchestrator 重试一次又被打爆 → 60s 后返 500。dio 看到"60s 后返回的 500"误判为"receive timeout"。
+
+**调试方法**：
+1. **看每层的 duration_ms 日志**：如果后端 http.request.done 写 `duration_ms=60002 status=500`，那 dio "receive timeout" 是误诊
+2. **从最内层往外查**：`grep -i "timeout\|deadline\|context canceled" backend.log`，找到第一个 timeout 发生在哪一层
+3. **写"每层超时清单"**：明确每层 timeout 值是多少，画在白板上
+
+**设计原则**：**外层 timeout = 内层 timeout × 重试次数 + 余量**
+- 内层调用 + 重试 1 次 = 60s × 2 + 余量 = ~140s
+- 外层至少 180s
+
+**爱宝最终超时栈**（Plan 9c 收敛）：
+- dio receiveTimeout：180s
+- 后端 orchestrator 总预算（隐式，由 LLM 多次调用决定）：~150s
+- LLM Gateway 单次调用：90s
+- 长度保护：最多 3 次 LLM 调用 = 3 × ~50s
+
+**为什么需要**：分布式系统里"超时栈失配"是反复出现的故障模式。每加一层都要画图——否则下游慢了报错指向上游，浪费几天定位。
+
+**何时引入**：Plan 9c Task 1 / commits `ec3af74` + `2fa6bc4` + `62b8613`。

@@ -20,7 +20,7 @@
 | 爱宝在故事中定位 | 百变伙伴（C 方案）：本体恒定，形态万变；孩子永远是主角 |
 | 输入流程 | 一句话需求 + 结构化兜底旋钮（C 方案） |
 | 输入主体 | 一期仅家长输入，孩子不直接交互 |
-| 时长档位 | 5 / 10 / 15 分钟 |
+| 时长档位 | **3 / 5 / 8 分钟**（Plan 9c 从 5/10/15 改下来；10/15 实测过长，孩子注意力够不上） |
 | 故事风格 | 5 类：温馨治愈 / 冒险探索 / 搞笑欢乐 / 神奇魔法 / 科普认知 |
 | 教育主题库 | 50-100 个主题，6 大分类，按年龄/挑战加权随机展示，可"换一批" |
 | TTS 方案 | 一期单一爱宝声音；预留多声音架构，后期升级 |
@@ -183,6 +183,7 @@
 - **2026-05-14** — Plan 7 完成：音频混音管线就位但 MVP 暂不启用 BGM；纯 TTS smoke 验证降级链路完整工作（`bgm_not_found → audio.mix.degraded → pure TTS`），未来收 BGM 上传 COS + `make seed-bgm` 零代码启用
 - **2026-05-15** — Plan 8 完成：连续剧 + HEARTBEAT 伪推送（轻量版）落地。第一次实现 LLM 显式承认上一集（ep2 真说"昨天和小熊玩得可开心"），剧情连续感工程化
 - **2026-05-16** — Plan 9-A 完成：第一个 Flutter 客户端 4 屏（login/home/generate/player）跑通，真 OPPO PJJ110 手机端到端听到爱宝为小宇讲故事；Plan 8 storyline 连续感在 player 屏首次被终端用户看见
+- **2026-05-17** — Plan 9b 完成：BOOTSTRAP / HEARTBEAT / 故事历史 / storyline 续集 UI / 新孩子创建 / nickname UTF-8 守门全部落地。修了 4 个 Riverpod/dio 状态管理坑（authProvider↔apiClient 循环依赖 / childProvider 跨 session 缓存 / 401 反馈环 / storyListProvider 无声缓存）+ 限流误伤读接口 + SMS GETDEL 反 UX。同日开 Plan 9c 第一战："故事质量"：时长系数 120→320 字/分钟、prompt 硬约束 ±10%、字数长度保护反馈式重写 ×2、SceneSeed 池 80 个种子破同质化、挡位 5/10/15→3/5/8、续集连续性 hard→warn-only、超时栈整体上调。5min 实测已稳定 4:30–5:30；8min 仍偶尔走 fallback（红线词单字「砍」「刺」误伤）
 
 ## 关键技术教训（来自实施过程）
 
@@ -206,3 +207,12 @@
 - **prompt 工程的措辞 + 位置联动**（Plan 6b 实测修正 Plan 6 结论）：Plan 6 时 memory 段在 system prompt 末尾 + 措辞"可以自然回调"，LLM 完全无视。Plan 6b 同时把段落移到 IDENTITY 之后 + 改成"请尝试借用以下记忆里的角色或场景"，Story 23 真回调了 Story 22 的小精灵——**单独改一项可能没效果，组合改才质变**。这条印证了知识库 11.10「软提示 vs 硬提示」的二元论过于简化，真实工程是"软提示 + 位置加权 + 措辞强度"的三维调节。已追加到知识库 11.10 末尾。
 - **前端 + 后端首次联调踩到 6 类 Android 工程坑**（Plan 9-A）：SDK 版本（compileSdk 36）/ NDK 版本（27.0.12077973）/ AndroidManifest INTERNET 权限 release 不自动注入 / cleartextTraffic 必须显式开 / adb reverse vs emulator-only `10.0.2.2` / 国产 ROM SELinux + R8 混淆联动 ExoPlayer NPE。每一类都有解但首次踩需要小时级 debug，都是 Flutter 真机 dev 经典话题。Plan 10 部署时所有 cleartext + debug-mode 假设必须拆除，release apk 的 ExoPlayer NPE 必须用 proguard rules 解。已记录知识库 12-flutter.md。
 - **彩蛋质量的"技术栈叠加"效应**（Plan 8 标志性突破）：Plan 6 时彩蛋率 0；Plan 6b 加"位置×措辞×内容浓度"三维调优 → 出现"借用元素"；Plan 8 在此基础上**叠加**(a) `storylines` 表给"连续剧"独立一级实体身份、(b) 系统 prompt 加"## 上一集剧情"结构化承接段、(c) PostCheck 引入 `RequireContinuity + PreviousElements` 硬约束、(d) chapter_hook 顺势调用提取 20 字下集预告 → ep2 LLM **真说出**"小宇~昨天咱们和小熊玩得可开心啦"。**单一手段达不到剧情感，多套机制叠加才出真效果**：数据约束 + prompt 结构 + 校验硬约束 + 顺势调用，缺一不可。这是 LLM 应用工程的标志性"组合拳"模式。已记录知识库 5.18 + 11.11。
+- **Riverpod 循环依赖的"无依赖中间人"模式**（Plan 9b 实战）：authProvider 和 apiClientProvider 双向 read 引爆 CircularDependencyError。在两者之间引入一个**完全无依赖**的 `authSnapshotProvider`（一个可变 bool）：apiClient 同步读快照，AuthNotifier 通过 `set state` override 同步写快照。这是分布式系统里"打断双向依赖"的同款模式（服务发现、配置中心、状态分发），不只是 Riverpod 特有。**看到循环就反射性地拆"两边都依赖对方"这件事**。已记录知识库 12.8。
+- **FutureProvider.family 的"无声缓存"陷阱**（Plan 9b 实战）：family 按 key 缓存，但底层数据库变化它无感知。爱宝里"最近听过"列表必须在 storyListProvider invalidate 后才会拉新数据，否则用户生成的新故事永远不显示。**判断口诀**：每次写后端数据时问"哪些读 provider 的结果可能因此变旧"，全列出来 invalidate。已记录知识库 12.9。
+- **嵌套超时栈的诊断**（Plan 9c 实战）：dio 报"receive timeout"看似客户端问题，实际是后端 LLM gateway 30s 超时被打爆 → 60s 后返 500 → dio 把这个误诊为自己超时。**调试方法**：看每层的 duration_ms 日志、从最内层往外查 timeout、画"每层超时清单"。**设计原则**：外层 = 内层 × 重试次数 + 余量。爱宝最终栈：dio 180s > orchestrator ~150s > LLM gateway 90s。已记录知识库 9.15 + 12.10。
+- **字数硬约束需要双重保险**（Plan 9c 实战）：LLM 没有原生字数感，单纯 prompt 写"必须 1400 字"命中率只有 ~50%。**真正解决方案**：prompt 硬约束 + 后置 `CountCJKRunes` 校验 + 反馈式重写（"上次只写了 X 字，必须超过 Y 字，请增加细节描写/对话/内心活动来扩展"）。**关键点**：1) 反馈具体数字 2) 告诉它**怎么**扩展 3) 设上限避免烧钱 4) 只采纳更长版本防恶化。已记录知识库 11.12。
+- **SceneSeed 多样性注入是"便宜熵"**（Plan 9c 实战）：80 个场景种子（9 大类）+ 反套路明文，连续 6 个故事重复率从 ~70%（每次"夜晚月光床边"）降到 ~0.03%。**比微调模型简单一万倍**，且不需要任何模型侧改动。"输入熵决定输出熵"的最简单实现。已记录知识库 11.13。
+- **嵌套硬约束的"互相绞杀"**（Plan 9c 实战）：Plan 8 加的"续集必须命中上一集元素"硬约束 + Plan 9c 加的"字数 ≥ 70% 期望"硬约束，叠加后用户拿到 45 秒罐头模板（续集不连贯 → fallback → 3min fallback 只有 150 字）。**修法**：每条硬约束都要问"失败时降级到什么"；如果降级体验比"放过"更差，改成 warn-only。**业务硬约束**（连续性 / 字数）和 **安全硬约束**（红线词 / 暴力 / 政治）要分级。已记录知识库 11.14。
+- **红线词单字陷阱**（Plan 9c 实战）：「刺」「砍」「杀」等单字过宽，会误伤"刺猬、刺绣、砍柴、砍价、杀虫剂、杀青"等无害童话词。**误报代价远超漏过代价**——8min 故事写到 1879 字本可朗读 6 分钟，因「刺」误判走 fallback 变成 1 分钟。**判断口诀**：拿这个单字搜 5 个常见无害童话词，≥4 个误伤就删，1-2 个改组合词。**红线词必须用最小完整意图组合**（刺死/刺伤/拿刀刺），不能用单字。已记录知识库 10.12。
+- **一次性消费 vs 重试容忍由 UX 决定**（Plan 9b 实战）：Redis GETDEL 原子操作在支付/兑换券里合理（用过即废），在 SMS 验证码里反 UX（输错 1 次后正确码也"已过期"）。**修法**：拆 Peek（GET 不删）+ Consume（DEL 仅匹配后）。**判断口诀**：用过即销毁前问"输错重试是否合理诉求"。已记录知识库 10.13。
+- **`flutter run` 后台模式的"假失败"**（Plan 9-A → 9b → 9c 反复踩）：PowerShell 后台跑 `flutter run` 总在 VM Service 握手处报"failed"，但 APK 已经装到手机上。看到这个错误不要怀疑打包失败，看 `√ Built ... apk` + `Installing ... apk` 行就行。Plan 9c 改 dio timeout 时反复用这条规律。

@@ -164,3 +164,117 @@ for path="/dev/socket/dnsproxyd"
 **何时引入**：Plan 9-A Task 11 / Issue 6 复盘。
 
 ---
+
+## 12.8 Riverpod CircularDependencyError —— "真循环" vs "类型推断循环"
+
+🎓 同一个错误信息可能是两种完全不同的根因。
+
+**是什么**：当 `ProviderA` 在构造中读取 `ProviderB`，而 `ProviderB` 又（间接）读到 `ProviderA`，Riverpod 抛 `CircularDependencyError`。
+
+**真循环（运行时）**：今天爱宝项目踩到的。
+```dart
+final apiClientProvider = Provider((ref) {
+  return ApiClient(
+    onUnauthorized: () => ref.read(authProvider.notifier).logout(),
+    //                          ^^^^^^^^^^^^ 触发 authProvider 构造
+  );
+});
+
+final authProvider = StateNotifierProvider((ref) {
+  return AuthNotifier(ref.watch(apiClientProvider), ref);
+  //                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 又依赖 apiClient
+});
+```
+两边互相 `read/watch` 对方的 notifier — 任何一边先构造都会触发对方再触发自己。
+
+**类型推断循环（编译时假象）**：有时只是 Dart 类型推断进了死胡同，给 `Provider<T>` 显式写 `<>` 参数就解了，运行时根本没循环。判断方法：在 `ref.read` 那行打 `print('reading...')`，跑起来看 print 是否真发生两次。
+
+**修法（真循环）**：引入"无依赖中间人"
+```dart
+class AuthSnapshot { bool isAuthenticated = false; }
+final authSnapshotProvider = Provider((_) => AuthSnapshot());
+
+// apiClient 读 snapshot（无依赖）
+final apiClientProvider = Provider((ref) {
+  final snap = ref.read(authSnapshotProvider);
+  return ApiClient(onUnauthorized: () {
+    if (!snap.isAuthenticated) return;
+    ref.read(authProvider.notifier).logout();  // 此时 authProvider 必已构造
+  });
+});
+
+// AuthNotifier 在 set state 时写 snapshot
+@override
+set state(AuthState v) {
+  super.state = v;
+  _ref.read(authSnapshotProvider).isAuthenticated = v is AuthAuthenticated;
+}
+```
+
+**为什么需要**：这种模式不只是 Riverpod 特有——服务发现、配置中心、状态分发都会用"无依赖中间人"打断循环。看到循环就反射性地拆"两边都依赖对方"这件事。
+
+**何时引入**：Plan 9b smoke / Fix 3（commit `32a3c71`）。
+
+---
+
+## 12.9 FutureProvider.family 的"无声缓存"陷阱
+
+🎓 `FutureProvider.family<T, Key>` 会按 key 缓存结果，但**底层数据变了它一无所知**。
+
+**是什么**：family 给同一份 build 函数加一个参数，每个 key 各缓存一份结果。爱宝里：
+```dart
+final storyListProvider = FutureProvider.family<List<StoryListItem>, int>(
+  (ref, childId) async => api.listStories(childId, limit: 5),
+);
+```
+首页 `ref.watch(storyListProvider(child.id))` 第一次拉，之后只要 key 不变就拿缓存。
+
+**陷阱**：用户在 generate 屏生成了新故事 → 后端 DB 多了一行 → 首页缓存还是旧 5 条 → 新故事**永远不显示**，直到杀 App 重开。
+
+**修法**：写操作的完成回调里手动 invalidate
+```dart
+final story = await ref.read(storyGenerationProvider.notifier).generate(...);
+ref.invalidate(storyListProvider(child.id));  // 必须的一行
+context.go('/player/${story.id}');
+```
+
+**为什么需要**：Riverpod 没有"自动跟 DB 同步"魔法——它只知道 provider 自己的输入有没有变。"列表变了"这种语义只有应用层知道，必须显式失效。
+
+**判断要不要 invalidate**：每次你写后端数据时问"哪些读 provider 的结果可能因此变旧？" 全都列出来 invalidate。
+
+**何时引入**：Plan 9b smoke / commit `1c41cf6`。
+
+---
+
+## 12.10 dio 多层超时栈：错误文本未必指向真凶
+
+🎓 看到 `DioException [receive timeout]` 第一反应可能是"客户端 timeout 太短"，但真相经常在更下游。
+
+**爱宝的栈**：
+```
+dio.receiveTimeout (客户端)
+  └── 后端 orchestrator 总耗时
+        └── LLM gateway 单次调用 timeout（每次重试都重新计）
+              └── Doubao 服务端处理
+```
+
+**今天踩过的具体场景**：
+- 加大字数后 Doubao 单次调用从 20s 变 60s
+- LLM gateway 30s 超时被打爆 → 重试一次又被打爆 → orchestrator 60s 报 500
+- dio 看到 60s 才返回的 500，自己 60s receiveTimeout 也刚好到，**误诊为 dio receive timeout**
+
+**诊断方法**：
+1. 看后端实际 http.request.done 的 `duration_ms` — 如果不到 dio 阈值就 500，那不是 dio 超时
+2. grep 后端 `*timeout*` / `deadline exceeded` 看哪一层先报
+3. 修的时候**每一层都要加余量**：内层 < 外层，留 ≥ 20% buffer
+
+**dio 三个超时**：
+- `connectTimeout`：TCP 握手 + TLS（10s 足够）
+- `sendTimeout`：上传请求体（GET/小 POST 用不到）
+- `receiveTimeout`：收响应体 —— **这个跟后端总耗时挂钩**
+
+**为什么需要**：分布式 / 嵌套调用系统里"超时栈"是反复出现的话题。设计原则：**外层 = 内层 × 重试次数 + 余量**。
+
+**何时引入**：Plan 9c Task 1 / commits `ec3af74` + `2fa6bc4` + `62b8613`。
+
+---
