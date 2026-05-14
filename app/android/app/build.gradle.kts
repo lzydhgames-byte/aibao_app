@@ -7,8 +7,10 @@ plugins {
 
 android {
     namespace = "com.aibao.aibao_app"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pinned by Plan 9-A Task 11 — flutter_secure_storage requires SDK 36;
+    // just_audio / audio_session / path_provider_android need NDK 27.0.12077973.
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -22,9 +24,9 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.aibao.aibao_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Pinned to 23 — flutter_secure_storage requires minSdk >= 23.
+        // Android 6.0 (API 23) covers 99%+ of active devices; safe baseline.
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

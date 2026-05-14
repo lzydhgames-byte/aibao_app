@@ -1,8 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Plan 9-A Task 11 fix: required for dio HTTP calls. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="aibao_app"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
