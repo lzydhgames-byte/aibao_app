@@ -31,10 +31,10 @@ class ApiClient {
             Dio(BaseOptions(
               baseUrl: '$baseUrl/api/v1',
               connectTimeout: const Duration(seconds: 10),
-              // 120s covers POST /stories/generate worst case after the
-              // Plan 9c rune-count bump: 15-min stories ask the LLM for
-              // ~4800 chars and Doubao can take 60-90s under load.
-              receiveTimeout: const Duration(seconds: 120),
+              // 180s covers POST /stories/generate worst case: Plan 9c's
+              // length guard can fire up to 2 rewrites (3 LLM calls total)
+              // on an 8min story, each ~45-55s on Doubao under load.
+              receiveTimeout: const Duration(seconds: 180),
               headers: {'Content-Type': 'application/json; charset=utf-8'},
               validateStatus: (status) => status != null && status < 600,
             )),

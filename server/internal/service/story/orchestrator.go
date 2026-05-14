@@ -231,19 +231,20 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		}
 	}
 
-	// Length guard: Doubao routinely under-writes (observed 600-700 chars
-	// for a 1400-1600 target). If the first output is below 70% of the
-	// minimum, ask the LLM to rewrite with an explicit '上次只写了 X 字，
-	// 太短' steer. Costs one extra LLM call when triggered; capped at
-	// one rewrite so the user-visible latency stays bounded.
+	// Length guard: Doubao routinely under-writes (observed 600-1500 chars
+	// for a 2300-char 8min target). Up to 2 rewrites with an explicit
+	// '上次只写了 X 字，太短' steer. Each rewrite costs one extra LLM call
+	// (~¥0.02). Capped at 2 so worst-case latency stays under ~3 LLM
+	// roundtrips. We always swap to the longest run observed across
+	// attempts — never regress.
 	if !llmFailed {
 		rmin, _ := prompt.ExpectedRuneBand(p.Duration)
-		got := prompt.CountCJKRunes(llmText)
 		threshold := rmin * 7 / 10
-		if got < threshold {
-			lg.Warn("story.length.too_short", "got", got, "expected_min", rmin, "threshold", threshold)
+		got := prompt.CountCJKRunes(llmText)
+		for retryNo := 1; retryNo <= 2 && got < threshold; retryNo++ {
+			lg.Warn("story.length.too_short", "attempt", retryNo, "got", got, "expected_min", rmin, "threshold", threshold)
 			retryUser := fmt.Sprintf(
-				"%s\n\n【重要】上次你只写了大约 %d 个汉字，远低于要求的 %d–%d 字硬约束。请重新创作一个完整的故事，必须超过 %d 个汉字。通过增加细节描写、对话、孩子的内心活动、场景刻画来扩展，不要省略情节。",
+				"%s\n\n【重要】上次你只写了大约 %d 个汉字，远低于要求的 %d–%d 字硬约束。请重新创作一个完整的故事，必须超过 %d 个汉字。通过增加细节描写、对话、孩子的内心活动、场景刻画、感官细节（看到/听到/闻到/触到的东西）来扩展，不要省略情节，不要急着收尾。",
 				po.UserPrompt, got, rmin, rmin*11/9, rmin,
 			)
 			resp, err := o.d.LLM.Generate(ctx, llm.GenerateRequest{
@@ -251,19 +252,20 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 				Messages:    []llm.Message{{Role: "system", Content: po.SystemPrompt}, {Role: "user", Content: retryUser}},
 				Temperature: o.d.Temperature,
 			})
-			if err == nil {
-				newGot := prompt.CountCJKRunes(resp.Text)
-				lg.Info("story.length.retry_done", "old", got, "new", newGot, "expected_min", rmin)
-				// Only swap if the rewrite is actually longer — defensive
-				// against a worse second roll.
-				if newGot > got {
-					llmText = resp.Text
-					llmInTok += resp.InputTokens
-					llmOutTok += resp.OutputTokens
-					_ = o.d.Budget.Record(ctx, resp.InputTokens, resp.OutputTokens)
-				}
-			} else {
-				lg.Warn("story.length.retry_failed", "err", err.Error())
+			if err != nil {
+				lg.Warn("story.length.retry_failed", "attempt", retryNo, "err", err.Error())
+				break
+			}
+			newGot := prompt.CountCJKRunes(resp.Text)
+			lg.Info("story.length.retry_done", "attempt", retryNo, "old", got, "new", newGot, "expected_min", rmin)
+			_ = o.d.Budget.Record(ctx, resp.InputTokens, resp.OutputTokens)
+			llmInTok += resp.InputTokens
+			llmOutTok += resp.OutputTokens
+			// Only swap if the rewrite is strictly longer — defensive
+			// against a worse roll.
+			if newGot > got {
+				llmText = resp.Text
+				got = newGot
 			}
 		}
 	}
