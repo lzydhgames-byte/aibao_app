@@ -103,7 +103,7 @@ func TestOrchestrator_HappyPath(t *testing.T) {
 	orch, repo := newOrch(t, mock)
 	out, err := orch.Generate(context.Background(), GenerateParams{
 		ChildID: 7, UserID: 42, Prompt: "讲个奥特曼睡前故事",
-		Duration: 10, Style: "温馨治愈", Topic: "勇敢",
+		Duration: 5, Style: "温馨治愈", Topic: "勇敢",
 	})
 	require.NoError(t, err)
 	assert.NotZero(t, out.ID)
@@ -145,7 +145,7 @@ func TestOrchestrator_PreCheck_RejectsRedline(t *testing.T) {
 	orch, _ := newOrch(t, mock)
 	_, err := orch.Generate(context.Background(), GenerateParams{
 		ChildID: 7, UserID: 42, Prompt: "我要血腥的故事",
-		Duration: 10, Style: "温馨治愈",
+		Duration: 5, Style: "温馨治愈",
 	})
 	require.Error(t, err)
 	ae, ok := apperr.AsAppError(err)
@@ -160,7 +160,7 @@ func TestOrchestrator_ChildNotOwned(t *testing.T) {
 	orch, _ := newOrch(t, mock)
 	_, err := orch.Generate(context.Background(), GenerateParams{
 		ChildID: 7, UserID: 999,
-		Prompt: "讲个故事", Duration: 10, Style: "温馨治愈",
+		Prompt: "讲个故事", Duration: 5, Style: "温馨治愈",
 	})
 	require.Error(t, err)
 	ae, _ := apperr.AsAppError(err)
@@ -185,7 +185,7 @@ func TestOrchestrator_BudgetExceeded(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = orch.Generate(context.Background(), GenerateParams{
-		ChildID: 7, UserID: 42, Prompt: "讲故事", Duration: 10, Style: "温馨治愈",
+		ChildID: 7, UserID: 42, Prompt: "讲故事", Duration: 5, Style: "温馨治愈",
 	})
 	require.Error(t, err)
 	ae, _ := apperr.AsAppError(err)
@@ -277,7 +277,7 @@ func TestOrchestrator_MemorySelector_NonEmpty(t *testing.T) {
 	orch := newOrchWithSelector(t, cl, sel)
 	_, err := orch.Generate(context.Background(), GenerateParams{
 		ChildID: 7, UserID: 42, Prompt: "讲个故事",
-		Duration: 10, Style: "温馨治愈",
+		Duration: 5, Style: "温馨治愈",
 	})
 	require.NoError(t, err)
 	assert.True(t, sel.called)
@@ -500,7 +500,7 @@ func TestOrchestrator_MemorySelector_EmptyStillGenerates(t *testing.T) {
 	orch := newOrchWithSelector(t, mock, sel)
 	out, err := orch.Generate(context.Background(), GenerateParams{
 		ChildID: 7, UserID: 42, Prompt: "讲个故事",
-		Duration: 10, Style: "温馨治愈",
+		Duration: 5, Style: "温馨治愈",
 	})
 	require.NoError(t, err)
 	assert.True(t, sel.called)

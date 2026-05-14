@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Single-select chip row for story duration (5 / 10 / 15 minutes).
+/// Single-select chip row for story duration (3 / 5 / 8 minutes).
 class DurationChips extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onChanged;
@@ -11,7 +11,7 @@ class DurationChips extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const List<int> options = [5, 10, 15];
+  static const List<int> options = [3, 5, 8];
 
   @override
   Widget build(BuildContext context) {

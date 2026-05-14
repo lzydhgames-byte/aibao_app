@@ -6,7 +6,7 @@
 //
 //	safetycheck precheck --child-fears "蜘蛛,蛇" "讲个奥特曼睡前故事"
 //	safetycheck postcheck --child=小宇 "故事内容..."
-//	safetycheck build-prompt --child=小宇 --age=5 --duration=10 \
+//	safetycheck build-prompt --child=小宇 --age=5 --duration=5 \
 //	    --style=温馨治愈 --topic=勇敢 "讲个奥特曼睡前故事"
 package main
 
@@ -146,7 +146,7 @@ func newBuildPromptCmd() *cobra.Command {
 	cmd.Flags().IntVar(&age, "age", 5, "child age in years")
 	cmd.Flags().StringVar(&gender, "gender", "boy", "boy / girl / unspecified")
 	cmd.Flags().StringVar(&fearsCSV, "child-fears", "", "comma-separated fear list")
-	cmd.Flags().IntVar(&duration, "duration", 10, "story duration in minutes (5/10/15)")
+	cmd.Flags().IntVar(&duration, "duration", 5, "story duration in minutes (3/5/8)")
 	cmd.Flags().StringVar(&style, "style", "温馨治愈", "story style")
 	cmd.Flags().StringVar(&topic, "topic", "", "educational topic (may be empty)")
 	cmd.Flags().StringVar(&memorySummary, "memory", "", "recent story memory summary")

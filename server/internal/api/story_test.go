@@ -112,7 +112,7 @@ func TestStoryHandler_Generate_OK(t *testing.T) {
 	r, _ := setupStoryHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"child_id": 1, "prompt": "讲个奥特曼睡前故事",
-		"duration": 10, "style": "温馨治愈", "topic": "勇敢",
+		"duration": 5, "style": "温馨治愈", "topic": "勇敢",
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/stories/generate", bytes.NewReader(body))
@@ -142,7 +142,7 @@ func TestStoryHandler_Generate_PreCheckRejection(t *testing.T) {
 	r, _ := setupStoryHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"child_id": 1, "prompt": "我要血腥的故事",
-		"duration": 10, "style": "温馨治愈",
+		"duration": 5, "style": "温馨治愈",
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/stories/generate", bytes.NewReader(body))
@@ -271,7 +271,7 @@ func TestStoryHandler_Get_OK(t *testing.T) {
 	r, repo := setupStoryHandler(t)
 	body, _ := json.Marshal(map[string]any{
 		"child_id": 1, "prompt": "讲个故事",
-		"duration": 10, "style": "温馨治愈",
+		"duration": 5, "style": "温馨治愈",
 	})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/stories/generate", bytes.NewReader(body))

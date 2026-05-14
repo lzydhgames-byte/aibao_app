@@ -74,8 +74,8 @@ func (h *StoryHandler) generate(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_argument", "user_msg": "请求参数不合法"})
 		return
 	}
-	if req.Duration != 5 && req.Duration != 10 && req.Duration != 15 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_duration", "user_msg": "duration 必须是 5/10/15"})
+	if req.Duration != 3 && req.Duration != 5 && req.Duration != 8 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"reason": "invalid_duration", "user_msg": "duration 必须是 3/5/8"})
 		return
 	}
 	if req.StartStoryline && req.StorylineID != nil {

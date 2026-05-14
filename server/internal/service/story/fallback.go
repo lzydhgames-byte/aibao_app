@@ -16,7 +16,7 @@ var ErrNoFallback = errors.New("no fallback template")
 // FallbackKey identifies which template to load.
 type FallbackKey struct {
 	Style    string // 温馨治愈 / 冒险探索 / 搞笑欢乐 / 神奇魔法 / 科普认知
-	Duration int    // 5 / 10 / 15 minutes
+	Duration int    // 3 / 5 / 8 minutes
 }
 
 // Fallback loads pre-written stories from disk and substitutes the child's
@@ -49,13 +49,14 @@ func styleFile(style string) string {
 }
 
 // Load returns a fallback story text with {{NICK}} replaced by nickname.
-// Tries exact (style, duration) match first; falls back to (style, 10min).
+// Tries exact (style, duration) match first; falls back to (style, 5min)
+// which is the "middle" slot guaranteed to exist for every style.
 func (f *Fallback) Load(key FallbackKey, nickname string) (string, error) {
 	prefix := styleFile(key.Style)
 	candidates := []string{
 		fmt.Sprintf("%s_%dmin.txt", prefix, key.Duration),
-		fmt.Sprintf("%s_10min.txt", prefix),
-		"warm_10min.txt",
+		fmt.Sprintf("%s_5min.txt", prefix),
+		"warm_5min.txt",
 	}
 	for _, c := range candidates {
 		path := filepath.Join(f.dir, c)

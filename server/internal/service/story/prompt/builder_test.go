@@ -19,7 +19,7 @@ func TestBuilder_BasicHappyPath(t *testing.T) {
 		ChildNickname:     "小宇",
 		ChildAgeYears:     5,
 		ChildGender:       "boy",
-		Duration:          10,
+		Duration:          5,
 		Style:             "温馨治愈",
 		Topic:             "勇敢",
 		UserPromptCleaned: "讲个奥特曼睡前故事",
@@ -32,7 +32,7 @@ func TestBuilder_BasicHappyPath(t *testing.T) {
 	assert.Contains(t, out.SystemPrompt, "男孩")
 	assert.Contains(t, out.SystemPrompt, "勇敢")
 	assert.Contains(t, out.SystemPrompt, "温馨治愈")
-	assert.Contains(t, out.SystemPrompt, "10 分钟")
+	assert.Contains(t, out.SystemPrompt, "5 分钟")
 	for _, n := range []string{"1.", "2.", "3.", "4.", "5.", "6.", "7.", "8."} {
 		assert.Contains(t, out.SystemPrompt, n, "missing constraint number %s", n)
 	}
@@ -48,7 +48,7 @@ func TestBuilder_FearListRendered(t *testing.T) {
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
 		ChildFearList: []string{"蜘蛛", "雷"},
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		PromptVersion: "v1",
 	})
@@ -63,7 +63,7 @@ func TestBuilder_NoFearListRendersAsNone(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		PromptVersion: "v1",
 	})
@@ -77,7 +77,7 @@ func TestBuilder_IPInstructionsAppear(t *testing.T) {
 		ChildNickname:            "小宇",
 		ChildAgeYears:            5,
 		ChildGender:              "boy",
-		Duration:                 10,
+		Duration:                 5,
 		Style:                    "温馨治愈",
 		NormalizedIPInstructions: "本故事中爱宝变身为爱宝奥特曼。",
 		PromptVersion:            "v1",
@@ -93,7 +93,7 @@ func TestBuilder_NoIPInstructionsOmitsBlock(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		PromptVersion: "v1",
 	})
@@ -107,7 +107,7 @@ func TestBuilder_MemorySummaryRenders(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		MemorySummary: "上次救过一只小恐龙阿绿。",
 		PromptVersion: "v1",
@@ -124,7 +124,7 @@ func TestBuilder_MemorySectionPosition(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		MemorySummary: "测试摘要",
 		PromptVersion: "v1",
@@ -144,7 +144,7 @@ func TestBuilder_EmptyMemoryGoesElseBranch(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		MemorySummary: "",
 		PromptVersion: "v1",
@@ -160,7 +160,7 @@ func TestBuilder_NoTopicShowsAsPure(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		Topic:         "",
 		PromptVersion: "v1",
@@ -175,7 +175,7 @@ func TestBuild_StorylineSection_RendersWhenHookOrSummariesPresent(t *testing.T) 
 		ChildNickname:            "小宇",
 		ChildAgeYears:            5,
 		ChildGender:              "boy",
-		Duration:                 10,
+		Duration:                 5,
 		Style:                    "温馨治愈",
 		StorylineHook:            "他们能找到宝藏吗",
 		StorylineRecentSummaries: []string{"第二集摘要", "第一集摘要"},
@@ -196,7 +196,7 @@ func TestBuild_StorylineSection_OmittedWhenBothEmpty(t *testing.T) {
 		ChildNickname: "小宇",
 		ChildAgeYears: 5,
 		ChildGender:   "boy",
-		Duration:      10,
+		Duration:      5,
 		Style:         "温馨治愈",
 		PromptVersion: "v1",
 	})
@@ -206,7 +206,7 @@ func TestBuild_StorylineSection_OmittedWhenBothEmpty(t *testing.T) {
 func TestBuilder_RuneCountRoughlyMatchesDuration(t *testing.T) {
 	b, err := NewBuilder(templatePath)
 	require.NoError(t, err)
-	for _, dur := range []int{5, 10, 15} {
+	for _, dur := range []int{3, 5, 8} {
 		out := b.Build(BuildInput{
 			ChildNickname: "小宇",
 			ChildAgeYears: 5,
