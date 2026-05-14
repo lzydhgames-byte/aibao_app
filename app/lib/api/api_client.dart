@@ -16,7 +16,9 @@ class ApiClient {
 
   ApiClient({
     required TokenStorage storage,
-    String baseUrl = 'http://10.0.2.2:8080', // Android emulator's host loopback
+    // Dev: real device via `adb reverse tcp:8080 tcp:8080` maps phone's
+    // 127.0.0.1:8080 → host PC. AVD-only builds can override to 10.0.2.2.
+    String baseUrl = 'http://127.0.0.1:8080',
     Dio? dio,
   })  : _dio = dio ??
             Dio(BaseOptions(
