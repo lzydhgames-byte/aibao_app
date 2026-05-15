@@ -1,4 +1,6 @@
-# 开发日志 — 2026-05-18（Plan 9c 第二战 · 红线词系统化清理 + 多样性收敛）
+# 开发日志 — 2026-05-15（Plan 9c 第二战 · 红线词系统化清理 + 多样性收敛）
+
+> ⚠️ 同日有两篇 devlog：本篇是 Plan 9c 第二战，另一篇 `2026-05-15.md` 是更早 Plan 8 完成的记录。
 
 ## 今日进展
 
@@ -154,7 +156,7 @@ df14e33 docs(devlog): fix MuMu emulator address in handoff card
 ## 🔖 明天接力卡（新会话用这一段直接接上）
 
 **一句话给新会话**：
-> 看 `docs/devlog/2026-05-18.md` 末尾的"接力卡"，从第 1 件开始干：PreCheck 反义教育 prompt 处理。
+> 看 `docs/devlog/2026-05-15-plan-09c-second.md` 末尾的"接力卡"，从第 1 件开始干：PreCheck 反义教育 prompt 处理。
 
 ### 优先级队列
 
@@ -176,7 +178,7 @@ df14e33 docs(devlog): fix MuMu emulator address in handoff card
 
 ### 启动环境
 
-**后端**（已在跑，task `byxqpja2y`，如新会话需要重启走 [05-17 接力卡的启动命令](2026-05-17.md#启动环境新会话首次执行)）
+**后端**（已在跑，task `byxqpja2y`，如新会话需要重启走 [05-14 接力卡的启动命令](2026-05-14-plan-09b-9c-first.md#启动环境新会话首次执行)）
 
 **模拟器**：Android Studio Device Manager 启动 Pixel 7（推荐），或 MuMu (`adb connect 127.0.0.1:7555`)
 

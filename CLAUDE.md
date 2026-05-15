@@ -14,8 +14,8 @@
 Plan 7 完成（2026-05-14）：音频混音管线全部代码就位；MVP 暂不收 BGM 文件，纯 TTS 路径运行 + 降级链路实测有效。
 Plan 8 完成（2026-05-15）：连续剧 + HEARTBEAT 伪推送（轻量版）落地。ep2 首次实现 LLM 明确承认上一集，剧情连续感工程化。
 Plan 9-A 完成（2026-05-16）：Flutter MVP 客户端 4 屏跑通，真 OPPO 手机端到端听到爱宝讲故事。
-Plan 9b 完成（2026-05-17）：BOOTSTRAP 卡片 / HEARTBEAT 问候 / 故事历史列表 / storyline 续集 / 新孩子创建 / nickname UTF-8 守门全部落地 + Riverpod/dio 4 个状态管理坑修完。
-Plan 9c 进行中（2026-05-17 开战，2026-05-18 第二战）：
+Plan 9b 完成（2026-05-14）：BOOTSTRAP 卡片 / HEARTBEAT 问候 / 故事历史列表 / storyline 续集 / 新孩子创建 / nickname UTF-8 守门全部落地 + Riverpod/dio 4 个状态管理坑修完。
+Plan 9c 进行中（2026-05-14 开战，2026-05-15 第二战）：
 - 第一战（05-17）：时长系数 120 → 320 字/分钟、prompt 硬约束 ±10%、长度保护（最多 2 次反馈式重写）、挡位 5/10/15 → 3/5/8、SceneSeed 80 种子、续集连续性 warn-only、超时栈整体上调
 - 第二战（05-18）：内容过滤分级宽容——红线词单字清理（删 血/砍/杀/鬼/性/惩罚/天堂/诡异/吓人）、horror 类整类 warn-only、negative_values 类整类 warn-only；长度保护阈值收紧 70%→85%；prompt 缓存破除（user role 末尾 seed+mandate+nonce 三件套，解决同 prompt 重复故事问题）；SceneSeed 审计日志
 - **15 个故事抽样实测**（05-18）：fallback 率从 30% 降到 7%，SceneSeed 15/15 全唯一，平均 ~62s/故事
