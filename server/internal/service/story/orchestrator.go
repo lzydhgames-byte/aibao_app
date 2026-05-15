@@ -293,16 +293,20 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 				"rule", postOut.MatchedRule,
 				"category", postOut.MatchedCategory)
 			// Soft fails (warn-only, ship the LLM text anyway):
-			//   1. continuity miss — Plan 9c 已经放宽：50→1min fallback 更糟
-			//   2. horror-category redline — 多为悬念铺垫，删到只剩名词性
-			//      恐怖意象（鬼魂/僵尸/吓死等）后命中率低；命中也轻
+			//   1. continuity miss — fallback (50→1min) 比"不连贯"更糟
+			//   2. horror-category redline — 多为悬念铺垫，命中也轻
+			//   3. negative_values redline — LLM 在教育性故事里把这类词
+			//      用在批判语境（"不要自私"/"嘲笑别人是不好的"），
+			//      字符串匹配看不出语境，hard-fail 把"学会分享"等
+			//      正面教育主题打成 fallback 反 UX。
 			// Hard fails (still drop to fallback):
 			//   - violence / sexual / political_religious / dangerous_imitation
-			//     / negative_values redlines
 			//   - fear_matched (孩子明确害怕的词)
 			//   - child_not_protagonist (主角错位)
+			cat := postOut.MatchedCategory
 			soft := postOut.RejectReason == model.PostCheckReasonNotContinuing ||
-				(postOut.RejectReason == "redline_matched" && postOut.MatchedCategory == "horror")
+				(postOut.RejectReason == "redline_matched" &&
+					(cat == "horror" || cat == "negative_values"))
 			if !soft {
 				llmFailed = true
 			}
