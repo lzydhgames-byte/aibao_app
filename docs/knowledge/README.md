@@ -25,8 +25,8 @@
 | [07-http-and-web.md](07-http-and-web.md) | 中间件、洋葱模型、Gin、状态码全集、Bearer 认证、CRUD（PATCH vs PUT）、限流算法对比 |
 | [08-database.md](08-database.md) | PG/ORM/连接池、migration（含 golang-migrate 实操）、GORM、Redis 数据结构、TTL/LRU、SETNX/GETDEL、AutoMigrate vs 生产 migrate schema 双向等价 |
 | [09-observability.md](09-observability.md) | 结构化日志、TraceID、lumberjack、Prometheus 三类指标、SLO、业务指标、预算熔断、fail-open 必须配指标告警、嵌套超时栈诊断 |
-| [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce、云服务标识符完整名 vs 短名陷阱、红线词单字陷阱、一次性消费 vs 重试容忍 |
-| [11-llm-engineering.md](11-llm-engineering.md) | Token、System/User Prompt、Temperature、流式 vs 整体、Fallback、上下文窗口、前缀缓存、火山引擎 Endpoint ID、fail-open vs fail-closed、软提示 vs 硬提示、LLM 顺势调用模式、字数硬约束 + 反馈重写、SceneSeed 多样性注入、嵌套硬约束互相绞杀 |
+| [10-security-and-compliance.md](10-security-and-compliance.md) | hash/salt、三种脱敏、JWT、HMAC vs RSA、Access/Refresh Token、AES-256-GCM/Nonce、云服务标识符完整名 vs 短名陷阱、红线词单字陷阱、一次性消费 vs 重试容忍、PreCheck/PostCheck 对称设计 |
+| [11-llm-engineering.md](11-llm-engineering.md) | Token、System/User Prompt、Temperature、流式 vs 整体、Fallback、上下文窗口、前缀缓存、火山引擎 Endpoint ID、fail-open vs fail-closed、软提示 vs 硬提示、LLM 顺势调用模式、字数硬约束 + 反馈重写、SceneSeed 多样性注入、嵌套硬约束互相绞杀、Prompt 缓存破除三件套、Token≠字数、内容过滤分级宽容 |
 | [12-flutter.md](12-flutter.md) | Widget 三件套、Riverpod 2.x、dio 拦截器、go_router + Riverpod 桥接、Android 平台配置、ColorOS SELinux NPE、debug vs release、Riverpod 循环依赖与无依赖中间人、FutureProvider.family 无声缓存、dio 多层超时栈 |
 
 ---

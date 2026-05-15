@@ -276,3 +276,111 @@ var sceneSeeds = []string{
 **为什么需要**：加约束"看起来在改善质量"，但叠加效应可能让用户撞到比"不加约束"更糟的状态。**约束系统设计要考虑组合爆炸**。
 
 **何时引入**：Plan 9c Task 4 / commit `96a86f4`。
+
+---
+
+## 11.15 Prompt 缓存破除：让"同 prompt 产同输出"变"同 prompt 产不同输出"
+
+🎓 LLM 服务（Doubao、Claude API、OpenAI 等）**默认开启 prompt prefix 缓存**——同样的 system+user prompt 命中缓存直接复用上一次输出。对一般 API 调用方这是省钱省延迟的优化，但对"创意生成"业务是灾难。
+
+**爱宝实测**：用户两次输入相同的"迪士尼乐园的一天"，得到**字面相同**的故事。
+
+**修法 = "破缓存三件套"**（追加到 user role 末尾，不动 system prompt）：
+
+```
+[本次创作随机灵感] <从池子里随机抽的场景种子>
+[多样性要求] 即使主题或需求和之前讲过的故事相同，也请写一个完全不同的情节、不同的转折、不同的角色配置。
+[本次会话 ID] <16-hex nonce>
+```
+
+**三件套各自分工**：
+
+| 件 | 作用 | LLM 视角 |
+|---|---|---|
+| SceneSeed | 实际给 LLM 一个不同抓手 | "把它写进情节" |
+| Mandate | 显式多样性指令 | "即使似曾相识也写不同的" |
+| Nonce | 纯破缓存 | 视为噪声忽略，但 bytes 永远不同 → cache miss |
+
+**为什么注入 user role 而非 system role**：
+1. **保留 system 缓存收益**：system prompt 是大段稳定文本（构造指令/角色定义/约束），它命中缓存对延迟和成本有真实价值
+2. **LLM 对 user role 更敏感**：多样性 mandate 写在 user 段比 system 段效果好（LLM 把 user 视为"本次具体任务"）
+3. **只破 user 的缓存就够了**：prompt prefix 缓存按"system 前缀 + user 前缀"匹配，user 末尾不同就 cache miss
+
+**复测**：同 prompt 两次 → 完全不同的故事。
+
+**何时引入**：Plan 9c 第二战 / commit `3231d8f`。
+
+---
+
+## 11.16 Token ≠ 字数：长度判断必须用真实字符计数
+
+🎓 `output_tokens` 是 LLM API 返回的计费单位，不是汉字数。
+
+**爱宝实测对照**：
+
+| output_tokens | 实际汉字数（CountCJKRunes） | 比率 |
+|---|---|---|
+| 1030 | ~1500 | 1.46 |
+| 1189 | ~1700 | 1.43 |
+| 2153 | ~3019 (story 61 LLM total) | 1.40 |
+
+中文场景下，1 token ≈ 1.3-1.5 汉字（含标点、空格、cue 标记）。
+
+**陷阱**：如果用 `output_tokens` 当字数阈值，会**严重低估**实际输出长度——明明 LLM 写够了，长度保护误判为"过短"重写。
+
+**正确做法**：写一个**专门的汉字计数函数**（爱宝里是 `prompt.CountCJKRunes(s)`）：
+```go
+func CountCJKRunes(s string) int {
+    n := 0
+    inBracket := false
+    for _, r := range s {
+        if r == '[' { inBracket = true; continue }
+        if r == ']' { inBracket = false; continue }
+        if inBracket { continue }
+        if r >= 0x4E00 && r <= 0x9FFF { n++ }  // CJK Unified Ideographs
+    }
+    return n
+}
+```
+
+**关键细节**：
+- 用 `rune` 遍历，不是 `byte`（中文每字 3 字节）
+- 跳过 `[音效:xxx]` / `[BGM情绪:xxx]` 这类标记（它们不会被朗读）
+- 只数 CJK Unified Ideographs（基本汉字区 U+4E00–U+9FFF），不数标点和数字
+- 不数英文字母（音频朗读速率不同；本项目纯中文场景可忽略）
+
+**为什么需要**：把"字数"做成可工程化的指标，需要一个**LLM API 输出无关的可重复计数函数**，避免把 token 当字数。
+
+**何时引入**：Plan 9c 第一战 + 第二战（持续观察 output_tokens vs 实际朗读时长的关系）。
+
+---
+
+## 11.17 内容过滤的分级宽容（vs 一刀切硬拦）
+
+🎓 内容过滤系统经常陷入两种极端：(a) 一刀切硬拦——任何红线词都触发 fallback，误伤多；(b) 全开——啥也不拦，安全风险高。**真正的工程化方案是"分级宽容"**：按"伤害严重度"对红线类别分级，**不同类走不同失败路径**。
+
+**爱宝项目最终的两级体系**：
+
+| 类别 | 失败动作 | 理由 |
+|---|---|---|
+| violence | hard-fail → fallback | 真正不该出现在儿童故事里 |
+| sexual | hard-fail → fallback | 同上 |
+| political_religious | hard-fail → fallback | 政治宗教敏感 |
+| dangerous_imitation | hard-fail → fallback | 自杀/玩火/虐待动物等模仿风险 |
+| **horror** | **warn-only → 仍上线** | LLM 偶尔写"鬼魂/吓死"多为悬念铺垫，命中也轻 |
+| **negative_values** | **warn-only → 仍上线** | 教育性故事经常在批判语境用（"不要做自私的人"），匹配看不出语境 |
+| fear_matched（孩子档案的害怕词） | hard-fail | 个性化禁忌，不能放宽 |
+| child_not_protagonist | hard-fail | 主角必须是孩子，这是 IP 设计底线 |
+
+**实施步骤**（爱宝实战）：
+1. PostCheck 输出 `MatchedCategory` 字段（不只是 hit 字符串）
+2. Orchestrator 判断 `soft = continuity_miss || (redline && cat in {horror, negative_values})`
+3. soft 失败：记 warn 日志，仍 ship LLM 文本；hard 失败：走 fallback
+
+**实测效果**：fallback 率从一刀切的 ~30% 降到分级后的 ~7%。剩下 7% 的 fallback 才是真正的内容安全拦截。
+
+**判断口诀**："这个失败原因如果放过，对儿童产生的实际伤害是什么？" 答得出具体伤害 → hard-fail；答不出或"读起来稍微不连贯" → warn-only。
+
+**为什么需要**：内容过滤的**误报代价**（用户拿到 80 字罐头）经常**严重 ≥ 漏过代价**。一刀切是"把对儿童无害的输出也当成不安全"——这不是更安全，是更差 UX。
+
+**何时引入**：Plan 9c 第二战 / commits `410fd56` + `87cdbc0`。

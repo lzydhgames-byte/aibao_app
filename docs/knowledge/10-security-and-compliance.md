@@ -163,6 +163,27 @@ codeStore.Consume(ctx, phoneHash)           // 对的才删
 
 **何时引入**：Plan 9b smoke / commit `2488d85`。
 
+## 10.14 PreCheck / PostCheck 对称设计原则
+
+🎓 安全管道经常分前置（用户输入端）和后置（LLM 输出端）。**两边应该用同一套分级宽容规则**——否则其中一边过严就成系统短板。
+
+**爱宝项目活案例**（Plan 9c 第二战发现）：
+- PostCheck 把 horror + negative_values 改 warn-only 后，效果显著（fallback 率从 30% → 7%）
+- 但**PreCheck 没改**——同一个 rules.yaml 的全部红线词在 PreCheck 仍 hard-fail
+- 结果：用户输入"不要嘲笑别人"（合理的反义教育 prompt）→ PreCheck 命中「嘲笑别人」（negative_values 类）→ 直接 400 拒绝
+
+**症结**：内容过滤上下游的"放行尺度"不一致——上游严卡，下游温和，等于上游决定了下限。
+
+**设计原则**：
+1. **共享规则源**：Pre/PostCheck 都从 `rules.yaml` 同一份数据源加载，不要双份维护
+2. **共享分类信息**：`PreCheckOutput` 和 `PostCheckOutput` 都要返回 `MatchedCategory`
+3. **共享分级表**：哪些 category 是 hard-fail / warn-only 在一个地方定义，两端引用
+4. **可以单边收紧**：例如 dangerous_imitation 可以 PreCheck 严卡（防恶意），PostCheck 也严卡——但不要 PreCheck 严+PostCheck 松或反过来
+
+**为什么需要**：安全管道是个"水桶"，最短的那块板决定整体性能。如果 PostCheck 设计精巧但 PreCheck 一刀切，PostCheck 改了也白改——用户根本走不到 PostCheck。
+
+**何时引入**：Plan 9c 第二战收尾发现 / 第三战待修。
+
 ## 即将引入
 
 - **双层安全链路**（前置 PreCheck + 后置 PostCheck，技术架构第 7 章）
