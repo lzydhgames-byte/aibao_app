@@ -239,7 +239,10 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 	// attempts — never regress.
 	if !llmFailed {
 		rmin, _ := prompt.ExpectedRuneBand(p.Duration)
-		threshold := rmin * 7 / 10
+		// 85% threshold (was 70%): observed 1500-char outputs slipping
+		// past the 70% gate but producing only 4:40 audio for an 8min
+		// slot. Tighter trigger costs at most one more LLM call.
+		threshold := rmin * 85 / 100
 		got := prompt.CountCJKRunes(llmText)
 		for retryNo := 1; retryNo <= 2 && got < threshold; retryNo++ {
 			lg.Warn("story.length.too_short", "attempt", retryNo, "got", got, "expected_min", rmin, "threshold", threshold)
