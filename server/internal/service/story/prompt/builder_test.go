@@ -37,7 +37,15 @@ func TestBuilder_BasicHappyPath(t *testing.T) {
 		assert.Contains(t, out.SystemPrompt, n, "missing constraint number %s", n)
 	}
 	assert.Contains(t, out.SystemPrompt, "v1")
-	assert.Equal(t, "讲个奥特曼睡前故事", out.UserPrompt)
+	// UserPrompt now carries the original user text followed by:
+	//   - a random SceneSeed line
+	//   - a variety-mandate sentence
+	//   - a per-request nonce
+	// (Plan 9c: defeats Doubao prompt-cache when the user repeats a prompt.)
+	assert.Contains(t, out.UserPrompt, "讲个奥特曼睡前故事")
+	assert.Contains(t, out.UserPrompt, "本次创作随机灵感")
+	assert.Contains(t, out.UserPrompt, "多样性要求")
+	assert.Contains(t, out.UserPrompt, "本次会话 ID")
 }
 
 func TestBuilder_FearListRendered(t *testing.T) {

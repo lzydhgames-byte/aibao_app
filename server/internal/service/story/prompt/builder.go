@@ -186,6 +186,7 @@ type templateVars struct {
 // Build renders the system prompt and returns it together with the cleaned user prompt.
 func (b *Builder) Build(in BuildInput) BuildOutput {
 	rmin, rmax := expectedRuneBand(in.Duration)
+	seed := pickSceneSeed()
 	vars := templateVars{
 		ChildNickname:            in.ChildNickname,
 		ChildAgeYears:            in.ChildAgeYears,
@@ -195,7 +196,7 @@ func (b *Builder) Build(in BuildInput) BuildOutput {
 		ExpectedRunes:            expectedRunesForDuration(in.Duration),
 		ExpectedRunesMin:         rmin,
 		ExpectedRunesMax:         rmax,
-		SceneSeed:                pickSceneSeed(),
+		SceneSeed:                seed,
 		Style:                    in.Style,
 		TopicText:                topicText(in.Topic),
 		NormalizedIPInstructions: in.NormalizedIPInstructions,
@@ -211,8 +212,35 @@ func (b *Builder) Build(in BuildInput) BuildOutput {
 		// programmer bug — surface it loudly.
 		panic(fmt.Sprintf("system_prompt template execution failed: %v", err))
 	}
+
+	// Even when the user's prompt is identical (e.g. "迪士尼乐园的一天"
+	// asked twice), we want a fresh story. Two mechanisms layered onto the
+	// user-role message:
+	//   1) SceneSeed echoed in user role (LLM weighs user > system for
+	//      novelty) — drives plot variation.
+	//   2) Variety-mandate sentence — explicit "even if you've answered
+	//      this before, write a different plot" steer.
+	//   3) Per-request nonce hex — pure cache-buster on the Doubao side;
+	//      LLM treats it as background noise but the bytes are different
+	//      every call so prompt-prefix cache cannot match.
+	userPrompt := in.UserPromptCleaned +
+		"\n\n[本次创作随机灵感] " + seed +
+		"\n[多样性要求] 即使主题或需求和之前讲过的故事相同，也请写一个完全不同的情节、不同的转折、不同的角色配置。" +
+		"\n[本次会话 ID] " + randomNonceHex()
 	return BuildOutput{
 		SystemPrompt: buf.String(),
-		UserPrompt:   in.UserPromptCleaned,
+		UserPrompt:   userPrompt,
 	}
+}
+
+// randomNonceHex returns a fresh 16-hex-char string for every call. Used
+// solely as a prompt-cache-buster so two identical user prompts get two
+// different LLM completions.
+func randomNonceHex() string {
+	const hex = "0123456789abcdef"
+	b := make([]byte, 16)
+	for i := range b {
+		b[i] = hex[sceneRNG.Intn(16)]
+	}
+	return string(b)
 }
