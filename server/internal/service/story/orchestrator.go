@@ -208,6 +208,7 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		buildIn.EpisodeNumber = storylineCtx.EpisodeNumber
 	}
 	po := o.builder.Build(buildIn)
+	lg.Info("prompt.scene_seed", "seed", po.SceneSeed)
 
 	var llmText string
 	var llmInTok, llmOutTok int

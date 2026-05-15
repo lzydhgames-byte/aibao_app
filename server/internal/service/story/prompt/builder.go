@@ -146,6 +146,9 @@ type BuildInput struct {
 type BuildOutput struct {
 	SystemPrompt string
 	UserPrompt   string
+	// SceneSeed is the scene-seed string injected into this build, exposed
+	// so the orchestrator can log it for variety auditing.
+	SceneSeed string
 }
 
 // Builder renders the system prompt template.
@@ -230,6 +233,7 @@ func (b *Builder) Build(in BuildInput) BuildOutput {
 	return BuildOutput{
 		SystemPrompt: buf.String(),
 		UserPrompt:   userPrompt,
+		SceneSeed:    seed,
 	}
 }
 
