@@ -21,19 +21,36 @@ type PostCheckOutput struct {
 	Pass         bool
 	RejectReason string
 	MatchedRule  string
+	// MatchedCategory is the redline category name (e.g. "horror", "violence")
+	// when RejectReason == "redline_matched". Empty otherwise. Lets the caller
+	// downgrade soft categories (e.g. horror) to warn-only while keeping
+	// strict ones (violence/sexual/etc.) as hard-fail.
+	MatchedCategory string
 }
 
 // PostChecker validates LLM output before returning it to the caller.
 type PostChecker struct {
-	rs       *RuleSet
-	redlineM *KeywordMatcher
+	rs            *RuleSet
+	redlineM      *KeywordMatcher
+	wordToCategory map[string]string
 }
 
 // NewPostChecker constructs a PostChecker bound to a RuleSet.
 func NewPostChecker(rs *RuleSet) *PostChecker {
+	w2c := make(map[string]string, len(rs.AllRedlinesFlat))
+	for cat, words := range rs.Redlines {
+		for _, w := range words {
+			// First-wins on duplicates across categories. This is fine: the
+			// flat list is deduped the same way upstream.
+			if _, ok := w2c[w]; !ok {
+				w2c[w] = cat
+			}
+		}
+	}
 	return &PostChecker{
-		rs:       rs,
-		redlineM: NewKeywordMatcher(rs.AllRedlinesFlat),
+		rs:             rs,
+		redlineM:       NewKeywordMatcher(rs.AllRedlinesFlat),
+		wordToCategory: w2c,
 	}
 }
 
@@ -53,7 +70,12 @@ func minProtagonistFor(duration int) int {
 // Check runs the full post-check pipeline.
 func (p *PostChecker) Check(in PostCheckInput) PostCheckOutput {
 	if hit, ok := p.redlineM.FindFirst(in.StoryText); ok {
-		return PostCheckOutput{Pass: false, RejectReason: "redline_matched", MatchedRule: hit}
+		return PostCheckOutput{
+			Pass:            false,
+			RejectReason:    "redline_matched",
+			MatchedRule:     hit,
+			MatchedCategory: p.wordToCategory[hit],
+		}
 	}
 	if len(in.ChildFearList) > 0 {
 		fearM := NewKeywordMatcher(in.ChildFearList)

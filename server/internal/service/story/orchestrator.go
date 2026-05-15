@@ -287,13 +287,22 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		}
 		postOut := o.d.PostCheck.Check(postIn)
 		if !postOut.Pass {
-			lg.Warn("story.postcheck.fail", "reason", postOut.RejectReason, "rule", postOut.MatchedRule)
-			// Continuity miss is a soft signal — we'd rather ship a slightly
-			// disconnected sequel than fall back to a 150-char canned template
-			// (observed Plan 9c: 3min slot fell back to a 45-second audio).
-			// All other PostCheck reasons (safety / child-not-protagonist /
-			// fear-list hit) remain hard fails.
-			if postOut.RejectReason != model.PostCheckReasonNotContinuing {
+			lg.Warn("story.postcheck.fail",
+				"reason", postOut.RejectReason,
+				"rule", postOut.MatchedRule,
+				"category", postOut.MatchedCategory)
+			// Soft fails (warn-only, ship the LLM text anyway):
+			//   1. continuity miss — Plan 9c 已经放宽：50→1min fallback 更糟
+			//   2. horror-category redline — 多为悬念铺垫，删到只剩名词性
+			//      恐怖意象（鬼魂/僵尸/吓死等）后命中率低；命中也轻
+			// Hard fails (still drop to fallback):
+			//   - violence / sexual / political_religious / dangerous_imitation
+			//     / negative_values redlines
+			//   - fear_matched (孩子明确害怕的词)
+			//   - child_not_protagonist (主角错位)
+			soft := postOut.RejectReason == model.PostCheckReasonNotContinuing ||
+				(postOut.RejectReason == "redline_matched" && postOut.MatchedCategory == "horror")
+			if !soft {
 				llmFailed = true
 			}
 		}
