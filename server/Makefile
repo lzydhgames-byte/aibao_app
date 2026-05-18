@@ -1,4 +1,4 @@
-.PHONY: build run-dev test test-integration lint migrate-up migrate-down seed-bgm clean
+.PHONY: build run-dev test test-integration lint rules-lint migrate-up migrate-down seed-bgm clean
 
 GO := go
 BINARY := bin/aibao-server
@@ -35,6 +35,9 @@ test-integration:
 
 lint:
 	golangci-lint run
+
+rules-lint:
+	$(GO) run ./cmd/rules-lint
 
 migrate-up:
 	migrate -path $(MIGRATE_DIR) -database "$(DB_URL_DEV)" up
