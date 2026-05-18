@@ -19,7 +19,7 @@
 | 9 | App 分发 | APK 直传（二维码 + 链接），跳过应用商店 | 朋友试用够用 |
 | 10 | App release 模式 | Plan 9-A 踩过 ExoPlayer NPE，必须加 proguard rules | 已记录到 12-flutter.md |
 | 11 | App 后端地址 | 编译时通过 `--dart-define=API_BASE=https://aibao.dhgames.com` 注入 | 一个 build 多用 |
-| 12 | 真 SMS | 腾讯云 SMS（签名+模板审核 ~3 工作日） | **明天先用 Mock SMS 上线**，等审核通过后热切真 SMS |
+| 12 | 真 SMS | **一期跳过，纯 Mock SMS 上线**（固定码 `123456`） | MVP 朋友试用阶段，腾讯云 SMS 签名审核流程在二期 Plan 11/12 一起处理。明确接受 UX 风险：任何手机号 + `123456` 都能登录注册 |
 | 13 | 备份 | cron + pg_dump → 本地 70GB 内（暂不传 COS） | 简单，磁盘够 |
 | 14 | 监控告警 | Prometheus `/metrics` 仅 127.0.0.1；本地 ssh tunnel 查 | spec 已定，单机够用 |
 | 15 | 日志收集 | slog 写文件 + lumberjack 轮转 | 已就位 |
@@ -57,9 +57,9 @@
 | Task | 工时 | 备注 |
 |---|---|---|
 | ~~0.1 注册域名~~ | ✅ 跳过 | 已用 `aibao.dhgames.com`（用户主域名子域名） |
-| 0.2 在 dhgames.com 控制台加 A 记录 `aibao.dhgames.com → <server_ip>` | 5min | 用户操作 |
-| 0.3 准备腾讯云 SMS 签名 + 模板审核申请 | 20min | 等待期 3 工作日 |
-| 0.4 准备 APK 签名 keystore | 10min | `keytool -genkey` 生成（部署时一起做） |
+| 0.2 在 dhgames.com 控制台加 A 记录 `aibao.dhgames.com → <server_ip>` | 5min | 用户已交接公司 DNS 同事处理 |
+| ~~0.3 腾讯云 SMS 签名/模板申请~~ | ✅ 跳过 | MVP 期纯 Mock SMS 上线，二期再接真 SMS |
+| 0.4 准备 APK 签名 keystore | 10min | `keytool -genkey` 生成（明天部署时一起做） |
 
 ### Phase 1：服务器初始化（0.5h）
 
@@ -145,6 +145,6 @@
 **前置确认**：
 - 域名 `aibao.dhgames.com` 已确认（复用用户主域名子域名）
 - DNS A 记录指向服务器 IP 是否已配置？`dig +short aibao.dhgames.com` 验证
-- SMS 签名/模板申请是否已在腾讯云提交审核？（3 工作日等待期，期间走 Mock SMS）
+- SMS：MVP 期跳过真 SMS，纯 Mock（固定码 `123456`）。后端无需改 gateway 配置，保持现在的 `sms.provider: mock` 即可
 
 **主战场命令**：spec 文档每行 task 都给出了具体 shell 命令片段。新会话直接照着跑就行。
