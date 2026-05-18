@@ -11,16 +11,19 @@ import (
 
 func newTestPreChecker(t *testing.T) *PreChecker {
 	t.Helper()
+	redlines := map[string][]string{
+		"violence":        {"血腥", "暴力"},
+		"horror":          {"鬼"},
+		"negative_values": {"嘲笑别人"},
+	}
 	rs := &RuleSet{
-		Redlines: map[string][]string{
-			"violence": {"血腥", "暴力"},
-			"horror":   {"鬼"},
-		},
+		Redlines: redlines,
 		IPWhitelist: map[string]string{
 			"奥特曼": "本故事中爱宝变身为爱宝奥特曼。",
 		},
 		IPBlacklist:     []string{"进击的巨人"},
-		AllRedlinesFlat: []string{"血腥", "暴力", "鬼"},
+		AllRedlinesFlat: flattenRedlines(redlines),
+		WordToCategory:  buildWordToCategory(redlines),
 	}
 	return NewPreChecker(rs, NewNoopIntentProvider())
 }
@@ -119,4 +122,33 @@ func TestPreCheck_MaxRunesDefault(t *testing.T) {
 		UserPrompt: "正常故事",
 	})
 	assert.True(t, out.Pass)
+}
+
+// Plan 9c 第三战：a negative_values redline ("嘲笑别人") in a
+// parent-education prompt ("不要嘘笑别人") must pass with a soft warning
+// rather than reject. Symmetric with the PostCheck warn-only behavior.
+func TestPreCheck_SoftRedline_NegativeValues_Passes(t *testing.T) {
+	pc := newTestPreChecker(t)
+	out := pc.Check(context.Background(), PreCheckInput{
+		UserPrompt:     "不要嘲笑别人",
+		MaxPromptRunes: 200,
+	})
+	require.True(t, out.Pass, "negative_values prompt should soft-pass")
+	require.Len(t, out.SoftWarnings, 1)
+	assert.Equal(t, "嘲笑别人", out.SoftWarnings[0].Rule)
+	assert.Equal(t, "negative_values", out.SoftWarnings[0].Category)
+}
+
+// Hard-category redline (violence) must still reject, even when soft
+// categories are also present in the same prompt.
+func TestPreCheck_HardRedline_StillRejects(t *testing.T) {
+	pc := newTestPreChecker(t)
+	out := pc.Check(context.Background(), PreCheckInput{
+		UserPrompt:     "不要嘲笑别人，但讲血腥的故事",
+		MaxPromptRunes: 200,
+	})
+	assert.False(t, out.Pass)
+	assert.Equal(t, "redline_matched", out.RejectReason)
+	assert.Equal(t, "violence", out.MatchedCategory)
+	assert.Equal(t, "血腥", out.MatchedRule)
 }

@@ -42,3 +42,26 @@ func (m *KeywordMatcher) FindFirst(input string) (string, bool) {
 	}
 	return "", false
 }
+
+// FindAll returns every keyword that appears in input, in matcher-stored
+// order. Used by PreCheck's tiered redline scan: a soft-category hit
+// becomes a warning, a hard-category hit rejects — but we must walk the
+// full list because a single prompt can contain both kinds (e.g. an
+// education prompt with a benign negative_values word AND a real
+// dangerous_imitation word should still reject).
+func (m *KeywordMatcher) FindAll(input string) []string {
+	if input == "" || len(m.keywords) == 0 {
+		return nil
+	}
+	lowered := strings.ToLower(input)
+	var out []string
+	for _, k := range m.keywords {
+		if k == "" {
+			continue
+		}
+		if strings.Contains(lowered, k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}

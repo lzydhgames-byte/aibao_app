@@ -20,9 +20,36 @@ type PreCheckOutput struct {
 	Pass             bool
 	RejectReason     string
 	MatchedRule      string
+	MatchedCategory  string // populated for redline_matched (hard or soft)
 	NormalizedPrompt string
 	NormalizedIPs    []string
 	IPInstructions   string
+
+	// SoftWarnings carries non-blocking hits (e.g. user typed an education
+	// prompt that contains a negative_values redline like "嘲笑别人" in a
+	// "不要嘲笑别人" framing). Callers can log/audit these but the input
+	// still passes. Matches the warn-only behavior PostCheck implements
+	// for the same categories (see knowledge/10-security-and-compliance.md
+	// §10.14 — PreCheck/PostCheck symmetric design).
+	SoftWarnings []SoftWarning
+}
+
+// SoftWarning is a non-blocking flag — a redline word in a soft category
+// was found in the user input, but we ship through because parental
+// education prompts ("不要嘲笑别人") legitimately contain these words
+// in critical framing.
+type SoftWarning struct {
+	Reason   string // e.g. "redline_matched"
+	Rule     string // the matched word, e.g. "嘲笑别人"
+	Category string // e.g. "negative_values"
+}
+
+// softRedlineCategories are the redline categories that PreCheck will WARN
+// on rather than REJECT. Kept in sync with the equivalent list in the
+// story orchestrator (see orchestrator.go PostCheck handling).
+var softRedlineCategories = map[string]bool{
+	"horror":          true,
+	"negative_values": true,
 }
 
 // PreChecker is the front-line gate.
@@ -56,9 +83,29 @@ func (p *PreChecker) Check(ctx context.Context, in PreCheckInput) PreCheckOutput
 	if hasDangerChars(in.UserPrompt) {
 		return PreCheckOutput{Pass: false, RejectReason: "danger_chars"}
 	}
-	if hit, ok := p.redlineM.FindFirst(in.UserPrompt); ok {
-		return PreCheckOutput{Pass: false, RejectReason: "redline_matched", MatchedRule: hit}
+
+	// Redline scan: walk every match, not just the first. A soft-category
+	// hit becomes a warning; the first hard-category hit (or first hit with
+	// an unknown/empty category) rejects. This lets a prompt like
+	// "不要嘲笑别人" pass (negative_values is soft) while
+	// "教小宇怎么自杀" still fails immediately on the dangerous_imitation hit.
+	var warnings []SoftWarning
+	for _, hit := range p.redlineM.FindAll(in.UserPrompt) {
+		cat := p.rs.WordToCategory[hit]
+		if softRedlineCategories[cat] {
+			warnings = append(warnings, SoftWarning{
+				Reason: "redline_matched", Rule: hit, Category: cat,
+			})
+			continue
+		}
+		return PreCheckOutput{
+			Pass:            false,
+			RejectReason:    "redline_matched",
+			MatchedRule:     hit,
+			MatchedCategory: cat,
+		}
 	}
+
 	if len(in.ChildFearList) > 0 {
 		fearM := NewKeywordMatcher(in.ChildFearList)
 		if hit, ok := fearM.FindFirst(in.UserPrompt); ok {
@@ -77,6 +124,7 @@ func (p *PreChecker) Check(ctx context.Context, in PreCheckInput) PreCheckOutput
 		NormalizedPrompt: in.UserPrompt,
 		NormalizedIPs:    ipRes.MatchedIPs,
 		IPInstructions:   ipRes.Instructions,
+		SoftWarnings:     warnings,
 	}
 }
 

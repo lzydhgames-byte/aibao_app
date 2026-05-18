@@ -142,6 +142,9 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 	if !preOut.Pass {
 		return nil, mapSafetyReject(preOut.RejectReason, preOut.MatchedRule)
 	}
+	for _, w := range preOut.SoftWarnings {
+		lg.Warn("story.precheck.soft_warn", "reason", w.Reason, "rule", w.Rule, "category", w.Category)
+	}
 
 	// Plan 8: preprocess storyline state.
 	var (

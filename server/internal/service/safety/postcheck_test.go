@@ -9,8 +9,14 @@ import (
 
 func newTestPostChecker(t *testing.T) *PostChecker {
 	t.Helper()
+	redlines := map[string][]string{
+		"violence": {"血腥", "暴力"},
+		"horror":   {"鬼"},
+	}
 	rs := &RuleSet{
-		AllRedlinesFlat: []string{"血腥", "暴力", "鬼"},
+		Redlines:        redlines,
+		AllRedlinesFlat: flattenRedlines(redlines),
+		WordToCategory:  buildWordToCategory(redlines),
 	}
 	return NewPostChecker(rs)
 }

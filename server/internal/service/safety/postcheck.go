@@ -30,27 +30,15 @@ type PostCheckOutput struct {
 
 // PostChecker validates LLM output before returning it to the caller.
 type PostChecker struct {
-	rs            *RuleSet
-	redlineM      *KeywordMatcher
-	wordToCategory map[string]string
+	rs       *RuleSet
+	redlineM *KeywordMatcher
 }
 
 // NewPostChecker constructs a PostChecker bound to a RuleSet.
 func NewPostChecker(rs *RuleSet) *PostChecker {
-	w2c := make(map[string]string, len(rs.AllRedlinesFlat))
-	for cat, words := range rs.Redlines {
-		for _, w := range words {
-			// First-wins on duplicates across categories. This is fine: the
-			// flat list is deduped the same way upstream.
-			if _, ok := w2c[w]; !ok {
-				w2c[w] = cat
-			}
-		}
-	}
 	return &PostChecker{
-		rs:             rs,
-		redlineM:       NewKeywordMatcher(rs.AllRedlinesFlat),
-		wordToCategory: w2c,
+		rs:       rs,
+		redlineM: NewKeywordMatcher(rs.AllRedlinesFlat),
 	}
 }
 
@@ -74,7 +62,7 @@ func (p *PostChecker) Check(in PostCheckInput) PostCheckOutput {
 			Pass:            false,
 			RejectReason:    "redline_matched",
 			MatchedRule:     hit,
-			MatchedCategory: p.wordToCategory[hit],
+			MatchedCategory: p.rs.WordToCategory[hit],
 		}
 	}
 	if len(in.ChildFearList) > 0 {

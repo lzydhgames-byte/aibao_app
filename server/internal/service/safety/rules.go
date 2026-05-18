@@ -25,6 +25,13 @@ type RuleSet struct {
 	// AllRedlinesFlat is the deduped union of all Redlines values, used by
 	// the matcher for O(N) substring scans without map lookups.
 	AllRedlinesFlat []string
+
+	// WordToCategory is the reverse index from a redline word to its category
+	// name (e.g. "violence", "horror", "negative_values"). First-wins on
+	// duplicates. Lets the Pre/PostCheck callers downgrade soft categories
+	// (horror / negative_values) to warn-only while keeping strict categories
+	// as hard-fail. See knowledge/10-security-and-compliance.md §10.14.
+	WordToCategory map[string]string
 }
 
 // LoadRules reads three YAML files and returns an immutable RuleSet.
@@ -46,12 +53,28 @@ func LoadRules(rulesPath, whitelistPath, blacklistPath string) (*RuleSet, error)
 	}
 
 	flat := flattenRedlines(redlines)
+	w2c := buildWordToCategory(redlines)
 	return &RuleSet{
 		Redlines:        redlines,
 		IPWhitelist:     wl,
 		IPBlacklist:     bl,
 		AllRedlinesFlat: flat,
+		WordToCategory:  w2c,
 	}, nil
+}
+
+// buildWordToCategory builds the reverse index. First category wins on
+// cross-category duplicates (matches the flat-list dedup ordering above).
+func buildWordToCategory(rl map[string][]string) map[string]string {
+	out := make(map[string]string)
+	for cat, words := range rl {
+		for _, w := range words {
+			if _, ok := out[w]; !ok {
+				out[w] = cat
+			}
+		}
+	}
+	return out
 }
 
 func readYAML(path string, into any) error {
