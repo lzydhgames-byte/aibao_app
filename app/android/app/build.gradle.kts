@@ -34,9 +34,18 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // Plan 10 MVP: signing with debug key — friends can install directly,
+            // bypassing Play Store. Replace before Plan 11/12 app-store release.
             signingConfig = signingConfigs.getByName("debug")
+            // Plan 10: enable R8 minification + proguard rules for just_audio /
+            // ExoPlayer reflection targets. Without rules audio breaks at runtime
+            // (see proguard-rules.pro for the canonical fix list).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

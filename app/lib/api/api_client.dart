@@ -22,7 +22,13 @@ class ApiClient {
     required TokenStorage storage,
     // Dev: real device via `adb reverse tcp:8080 tcp:8080` maps phone's
     // 127.0.0.1:8080 → host PC. AVD-only builds can override to 10.0.2.2.
-    String baseUrl = 'http://127.0.0.1:8080',
+    // Prod: compile-time override via
+    //   flutter build apk --release --dart-define=API_BASE=https://aibao.dhgames.com
+    // Plan 10 deployment uses the dart-define for release APKs distributed via QR code.
+    String baseUrl = const String.fromEnvironment(
+      'API_BASE',
+      defaultValue: 'http://127.0.0.1:8080',
+    ),
     Dio? dio,
     // Plan 9b: invoked when a non-/auth response is 401 (token rejected).
     // Wire to authProvider.logout to bounce user back to /login.
