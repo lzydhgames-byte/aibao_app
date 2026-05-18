@@ -12,13 +12,13 @@
 | 2 | 进程管理 | systemd（`Restart=always`） | spec 1.1 已定，跟 spec 一致 |
 | 3 | 反向代理 | Nginx | spec 1.1 已定 |
 | 4 | HTTPS 证书 | Let's Encrypt + certbot 自动续期 | 免费 + 自动 |
-| 5 | 域名 | 当天买（.com 或 .top，香港不备案） | 1 小时拿到 |
+| 5 | 域名 | **`aibao.dhgames.com`**（复用用户主域名的子域名） | 0 成本，立即生效；香港 IP 不需备案 |
 | 6 | 数据库 | PostgreSQL 16（apt install 服务器原生） | 不上 Docker（spec 1.2 已说 YAGNI） |
 | 7 | Redis | apt install 服务器原生 | 同上 |
 | 8 | 数据迁移 | golang-migrate（已就位）启动前手动跑 | 单实例无并发，简单稳 |
 | 9 | App 分发 | APK 直传（二维码 + 链接），跳过应用商店 | 朋友试用够用 |
 | 10 | App release 模式 | Plan 9-A 踩过 ExoPlayer NPE，必须加 proguard rules | 已记录到 12-flutter.md |
-| 11 | App 后端地址 | 编译时通过 `--dart-define=API_BASE=https://api.aibao.xxx` 注入 | 一个 build 多用 |
+| 11 | App 后端地址 | 编译时通过 `--dart-define=API_BASE=https://aibao.dhgames.com` 注入 | 一个 build 多用 |
 | 12 | 真 SMS | 腾讯云 SMS（签名+模板审核 ~3 工作日） | **明天先用 Mock SMS 上线**，等审核通过后热切真 SMS |
 | 13 | 备份 | cron + pg_dump → 本地 70GB 内（暂不传 COS） | 简单，磁盘够 |
 | 14 | 监控告警 | Prometheus `/metrics` 仅 127.0.0.1；本地 ssh tunnel 查 | spec 已定，单机够用 |
@@ -56,10 +56,10 @@
 
 | Task | 工时 | 备注 |
 |---|---|---|
-| 0.1 注册域名（.com 或 .top） | 30min | 用户操作，腾讯云 / 阿里云 |
-| 0.2 解析 DNS A 记录到服务器 IP | 5min | 顺手 |
+| ~~0.1 注册域名~~ | ✅ 跳过 | 已用 `aibao.dhgames.com`（用户主域名子域名） |
+| 0.2 在 dhgames.com 控制台加 A 记录 `aibao.dhgames.com → <server_ip>` | 5min | 用户操作 |
 | 0.3 准备腾讯云 SMS 签名 + 模板审核申请 | 20min | 等待期 3 工作日 |
-| 0.4 准备 APK 签名 keystore | 10min | `keytool -genkey` 生成 |
+| 0.4 准备 APK 签名 keystore | 10min | `keytool -genkey` 生成（部署时一起做） |
 
 ### Phase 1：服务器初始化（0.5h）
 
@@ -80,8 +80,8 @@
 | 2.3 Redis：bind 127.0.0.1 / requirepass / persistence | 5min |  |
 | 2.4 跑 golang-migrate 建表 | 5min | 直接 `migrate -path migrations -database "..." up` |
 | 2.5 Nginx：写 server block 反代 :8080 / 配置访问日志 | 15min |  |
-| 2.6 certbot：申请 Let's Encrypt 证书 + 自动续期 | 10min | `certbot --nginx -d api.aibao.xxx` |
-| 2.7 验证 HTTPS：`curl https://api.aibao.xxx/health` | 5min |  |
+| 2.6 certbot：申请 Let's Encrypt 证书 + 自动续期 | 10min | `certbot --nginx -d aibao.dhgames.com` |
+| 2.7 验证 HTTPS：`curl https://aibao.dhgames.com/health` | 5min |  |
 
 ### Phase 3：后端部署（1h）
 
@@ -93,7 +93,7 @@
 | 3.4 写 `/etc/aibao/env`（敏感凭据：JWT secret / AES key / Doubao key / Minimax key / COS key） | 10min | root:root 0600 |
 | 3.5 写 systemd unit `/etc/systemd/system/aibao.service` | 15min | EnvironmentFile + Restart=on-failure |
 | 3.6 `systemctl daemon-reload && systemctl enable --now aibao` | 5min |  |
-| 3.7 验证：`journalctl -u aibao -f` + `curl https://api.aibao.xxx/health` | 5min |  |
+| 3.7 验证：`journalctl -u aibao -f` + `curl https://aibao.dhgames.com/health` | 5min |  |
 
 ### Phase 4：App release 打包（1h）
 
@@ -102,7 +102,7 @@
 | 4.1 在 ApiClient 默认 baseUrl 加 `String.fromEnvironment('API_BASE', defaultValue: 'http://127.0.0.1:8080')` | 10min |  |
 | 4.2 配 `android/app/build.gradle.kts` signing config（用 4.4 的 keystore） | 10min |  |
 | 4.3 写 `android/app/proguard-rules.pro` 解 ExoPlayer NPE（12-flutter.md §12.7 已记） | 15min |  |
-| 4.4 `flutter build apk --release --dart-define=API_BASE=https://api.aibao.xxx` | 5min |  |
+| 4.4 `flutter build apk --release --dart-define=API_BASE=https://aibao.dhgames.com` | 5min |  |
 | 4.5 真机（OPPO 或 AVD）安装 release APK，端到端冒烟 | 15min |  |
 | 4.6 APK 上传到 nginx static 目录 / 生成下载链接 + 二维码 | 5min | qrencode CLI |
 
@@ -129,7 +129,7 @@
 
 部署完毕后必须满足：
 
-1. ✅ `https://api.aibao.xxx/health` 返回 `{"status":"ok"}`
+1. ✅ `https://aibao.dhgames.com/health` 返回 `{"status":"ok"}`
 2. ✅ 二维码扫码后能下载安装 release APK
 3. ✅ 真机走完 Plan 9d 13 项里的 user-flow 子集（登录到听完一个故事）
 4. ✅ `systemctl status aibao` 显示 active running
@@ -143,8 +143,8 @@
 > Plan 10 部署上线开干。看 `docs/superpowers/specs/2026-05-18-plan-10-deployment.md` 任务拆解，从 Phase 0 开始。今天用户可能已经完成 Phase 0.1-0.4。
 
 **前置确认**：
-- 域名买了吗？什么？
-- DNS 解析到 IP 了吗？dig +short 验证
-- SMS 签名/模板申请提交了吗？
+- 域名 `aibao.dhgames.com` 已确认（复用用户主域名子域名）
+- DNS A 记录指向服务器 IP 是否已配置？`dig +short aibao.dhgames.com` 验证
+- SMS 签名/模板申请是否已在腾讯云提交审核？（3 工作日等待期，期间走 Mock SMS）
 
 **主战场命令**：spec 文档每行 task 都给出了具体 shell 命令片段。新会话直接照着跑就行。
