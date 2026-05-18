@@ -21,7 +21,10 @@ Plan 9c 进行中（05-14 第一战 / 05-15 第二战 / 05-18 第三战）：
 - 第三战（05-18）：PreCheck 对称引入 category 分级（fix "不要嘲笑别人" 等反义教育 prompt 被 400）；字数系数 320→280 + 区间 ±5%（5min 实测 5/5 全部 4:31–5:07）；TTS 成本 metric（`tts_chars_total` + `tts_chars_excess_total`）；rules-lint 工具上线；8min 专属结构化指引（实测对 Doubao 短偏改善有限）
 
 未解决（接受现状）：8min 挡 LLM 写到 ~1500 字就刹车，实测平均 6:30，比目标短 19%。属 Doubao 训练偏好，prompt 工程已达瓶颈。
-当前下一步：明天可选——memory selector 改造（避免中段重复）/ PostCheck 主角阈值校准 / BGM 入库 / 真机端到端验证。
+
+**Plan 9d 完成（2026-05-18）**：全量回归冒烟 13/13 通过。Plan 9 大系列（9-A/9b/9c/9d）整体收官——从"刚跑通"到"稳定可演示"，从登录到听完个性化故事的完整闭环 100% 可工程化交付。脚本 `scripts/plan9d-api-smoke.ps1` + `scripts/plan9d-ui-via-api.ps1` 留作日后回归检查工具。
+
+当前下一步：Plan 10 部署上线（推荐，分 3-4 工作日）/ Plan 11 BGM 入库（2-3h）。
 
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)

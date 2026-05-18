@@ -174,3 +174,68 @@ if err := c.ShouldBindJSON(&req); err != nil { ... }
 **适用范围更广**：不止 UTF-8——任何"字节层面的格式校验"（如签名验证、HMAC、敏感字段长度上限以字节计）都该走 raw body。"业务层面的字段校验"（如手机号格式、字段必填）才走 post-bind。
 
 **项目体现**：`server/internal/api/child.go` POST 和 PATCH 入口；commit `8a4d158`。
+
+---
+
+## 6.14 PowerShell 5 跑 UTF-8 脚本的"三连坑"
+
+🎓 Windows 默认 codepage 是 GBK（cp936），PowerShell 5（Windows PowerShell，不是 PS Core 7）跟 UTF-8 文件打交道有三个独立的坑要同时绕，否则中文 prompt smoke 测试都跑不起来。
+
+**爱宝项目 Plan 9d 实战**：写了一个 PowerShell smoke 脚本批量调后端 API 跑回归测试，第一次跑直接报"Unexpected token"和"无法连接"——结果**三个坑串联**：
+
+### 坑 1：`& script.ps1` 文件按 GBK 解码
+
+脚本文件是 UTF-8 写的（编辑器/Write 工具默认），PowerShell 5 用 ANSI codepage 读 → 中文字符全乱码 → 语法错误。
+
+**修法**：通过 stdin pipe 让 PowerShell 自己控制解码
+```powershell
+Get-Content -Encoding UTF8 -Raw script.ps1 | Invoke-Expression
+```
+
+### 坑 2：`Invoke-RestMethod -Body $jsonString` 二次编码
+
+直接传 JSON 字符串给 `-Body`，PowerShell 会按 ASCII/Windows-1252 重新编码 → 服务端收到 mojibake 字节 → JSON parse 失败 → 400 invalid_argument。
+
+**修法**：显式转 UTF-8 字节
+```powershell
+$bodyJson = $bodyObj | ConvertTo-Json -Compress
+$bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyJson)
+Invoke-RestMethod -Body $bodyBytes -ContentType 'application/json; charset=utf-8' ...
+```
+
+### 坑 3：控制台输出 Unicode 字符乱码
+
+脚本里用 `✓`、`✗`、emoji 这类非 ASCII 字符做美化 → PowerShell 5 console 按 GBK 显示 → `鉁?` 之类乱码。
+
+**修法**：把 console 输出编码设为 UTF-8
+```powershell
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+```
+或者**根本不用 Unicode 美化字符**——用 ASCII `PASS`/`FAIL` 字样。
+
+### 三连坑的完整模板
+
+```powershell
+# Caller side:
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Get-Content -Encoding UTF8 -Raw your-script.ps1 | Invoke-Expression
+
+# Inside your-script.ps1:
+function Post-Json($url, $body, $tok) {
+  $json = $body | ConvertTo-Json -Compress
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+  return Invoke-RestMethod -Method POST -Uri $url `
+    -ContentType 'application/json; charset=utf-8' `
+    -Headers @{Authorization="Bearer $tok"} -Body $bytes
+}
+Write-Host "  [PASS] $itemName - $detail"   # ASCII only
+```
+
+**判断你撞了哪个坑**：
+- 报 "Unexpected token" 在你完全没碰过的中文注释行 → 坑 1
+- 后端日志收到的 prompt 是 mojibake 但脚本本身正常 → 坑 2
+- 输出 ASCII 正常但 emoji 乱码 → 坑 3
+
+**为什么需要**：跨平台脚本默认假设 UTF-8 通用，但 Windows PowerShell 5 一直绑定到系统 ANSI codepage。CI 或本地批量测试中文 prompt 时三坑必撞——把这个模板抄到 scripts/ 目录复用。
+
+**何时引入**：Plan 9d / 写 `scripts/plan9d-api-smoke.ps1` 时三坑同时撞了一遍才学到。
