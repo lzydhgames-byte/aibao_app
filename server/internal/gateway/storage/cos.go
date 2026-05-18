@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -52,8 +53,26 @@ func NewCOS(cfg COSConfig) (*COSClient, error) {
 		Host:   fmt.Sprintf("%s.cos.%s.myqcloud.com", bucketHost, cfg.Region),
 	}
 	b := &cos.BaseURL{BucketURL: bucketURL}
+	// Plan 10 deploy: 香港 → 上海 COS 首次 TLS 握手偶发 > 10s, hitting
+	// http.DefaultTransport.TLSHandshakeTimeout (10s default). Explicitly
+	// build a transport with 30s TLS timeout + keep-alive so warm connections
+	// reuse the TLS session and skip handshake on follow-up uploads.
+	inner := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          10,
+		MaxIdleConnsPerHost:   5,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
 	c := cos.NewClient(b, &http.Client{
 		Transport: &cos.AuthorizationTransport{
+			Transport: inner,
 			SecretID:  cfg.SecretID,
 			SecretKey: cfg.SecretKey,
 		},
