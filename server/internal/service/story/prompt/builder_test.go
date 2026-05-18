@@ -223,9 +223,9 @@ func TestBuilder_RuneCountRoughlyMatchesDuration(t *testing.T) {
 			Style:         "温馨治愈",
 			PromptVersion: "v1",
 		})
-		center := dur * 320
-		rmin := center * 9 / 10
-		rmax := center * 11 / 10
+		center := dur * 280
+		rmin := center * 95 / 100
+		rmax := center * 105 / 100
 		assert.Contains(t, out.SystemPrompt, fmt.Sprintf("%d–%d 个汉字", rmin, rmax),
 			"duration=%d minutes should render the [%d, %d] hard range", dur, rmin, rmax)
 	}

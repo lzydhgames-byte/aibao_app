@@ -3,6 +3,7 @@ package audio
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/aibao/server/internal/gateway/tts"
@@ -10,6 +11,7 @@ import (
 	"github.com/aibao/server/internal/model"
 	"github.com/aibao/server/internal/pkg/logger"
 	"github.com/aibao/server/internal/repository"
+	"github.com/aibao/server/internal/service/story/prompt"
 )
 
 // BGMPicker is the minimal surface Orchestrator needs from BGMRepo.
@@ -19,11 +21,12 @@ type BGMPicker interface {
 
 // ComposeRequest is the input to Compose.
 type ComposeRequest struct {
-	StoryID   int64
-	ChildID   int64
-	StoryText string                // raw LLM output (with cues)
-	Style     string                // story.Style for mood fallback
-	Voice     tts.SynthesizeRequest // voice/model/format pre-filled by caller; Text overwritten
+	StoryID     int64
+	ChildID     int64
+	DurationMin int                   // 3 / 5 / 8 — used for TTS cost-tracking labels
+	StoryText   string                // raw LLM output (with cues)
+	Style       string                // story.Style for mood fallback
+	Voice       tts.SynthesizeRequest // voice/model/format pre-filled by caller; Text overwritten
 }
 
 // ComposeResponse is what Orchestrator returns.
@@ -67,6 +70,21 @@ func (o *Orchestrator) Compose(ctx context.Context, req ComposeRequest) (*Compos
 	ttsResp, err := o.tts.Synthesize(ctx, voiceReq)
 	if err != nil {
 		return nil, err
+	}
+
+	// Cost-tracking (Plan 9c third battle). Count CJK runes actually sent
+	// to TTS (the bill basis) and how many exceed the duration slot's
+	// expected ceiling. We import prompt only for CountCJKRunes +
+	// ExpectedRuneBand — a tiny coupling but cheaper than threading the
+	// counter logic through every layer above.
+	if o.bm != nil && req.DurationMin > 0 {
+		runes := prompt.CountCJKRunes(pr.CleanText)
+		_, rmax := prompt.ExpectedRuneBand(req.DurationMin)
+		label := strconv.Itoa(req.DurationMin)
+		o.bm.TTSCharsTotal.WithLabelValues(label).Add(float64(runes))
+		if excess := runes - rmax; excess > 0 {
+			o.bm.TTSCharsExcessTotal.WithLabelValues(label).Add(float64(excess))
+		}
 	}
 
 	base := &ComposeResponse{

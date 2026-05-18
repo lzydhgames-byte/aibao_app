@@ -38,21 +38,30 @@ func topicText(t string) string {
 }
 
 // expectedRunesForDuration approximates the target story length in CJK
-// characters. Calibrated against real Minimax t2a_v2 (audiobook_female_1)
-// output: ~300 chars/min observed; we target 320 chars/min so the LLM
-// slightly over-writes rather than under-fills the audio window.
+// characters. Calibrated against real Minimax t2a_v2 (audiobook_female_1):
+//
+//   - Round 1 (Plan 9c first battle): 120 chars/min — way too low, output
+//     was 1/4 of expected duration.
+//   - Round 2 (Plan 9c second battle): 320 chars/min — fixed the 1-min
+//     fallback problem, but 15-story sample averaged +14% over duration,
+//     worst-case +33% (5min slot ran 6:38).
+//   - Round 3 (Plan 9c third battle, today): 280 chars/min — empirical
+//     median from the round-2 sample. We accept slightly higher fallback
+//     risk in exchange for ~10% lower TTS bill per story.
 //
 // Returns the CENTER of the target band; the prompt template renders a
-// ±10% window around this value as a hard constraint.
+// ±5% window around this value as a hard constraint (was ±10% in round 2).
 func expectedRunesForDuration(durationMin int) int {
-	return durationMin * 320
+	return durationMin * 280
 }
 
 // expectedRuneBand returns the inclusive [min, max] rune range the LLM
-// must hit, computed as ±10% around expectedRunesForDuration.
+// must hit, computed as ±5% around expectedRunesForDuration. Tighter
+// window (was ±10%) discourages the LLM from interpreting the upper bound
+// as an aspirational target.
 func expectedRuneBand(durationMin int) (int, int) {
 	c := expectedRunesForDuration(durationMin)
-	return c * 9 / 10, c * 11 / 10
+	return c * 95 / 100, c * 105 / 100
 }
 
 // ExpectedRuneBand exposes expectedRuneBand for callers outside this

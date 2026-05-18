@@ -96,10 +96,11 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	}
 
 	composed, err := h.composer.Compose(ctx, audio.ComposeRequest{
-		StoryID:   story.ID,
-		ChildID:   story.ChildID,
-		StoryText: story.TextContent,
-		Style:     story.Style,
+		StoryID:     story.ID,
+		ChildID:     story.ChildID,
+		DurationMin: story.DurationMinutes,
+		StoryText:   story.TextContent,
+		Style:       story.Style,
 		Voice: tts.SynthesizeRequest{
 			VoiceID: h.cfg.VoiceID, Model: h.cfg.Model,
 			Format: h.cfg.Format, SampleRate: h.cfg.SampleRate,

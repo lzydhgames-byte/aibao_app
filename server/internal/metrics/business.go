@@ -23,6 +23,15 @@ type Business struct {
 	AudioReadyTotal       prometheus.Counter
 	AudioFailedTotal      *prometheus.CounterVec // labels: stage (tts/storage/db)
 
+	// Plan 9c third battle: cost-tracking. Counts CJK runes actually sent
+	// to TTS (basis for the bill) and how many of those exceeded the
+	// duration-slot's expected ceiling. Lets us watch
+	// rate(tts_chars_excess_total) / rate(tts_chars_total) — if it
+	// trends above ~10% we are over-paying for audio that ran past the
+	// requested duration. Labels: duration_min (3/5/8).
+	TTSCharsTotal       *prometheus.CounterVec
+	TTSCharsExcessTotal *prometheus.CounterVec
+
 	// Plan 6
 	MemorySummaryDuration    prometheus.Histogram
 	MemorySummaryTotal       *prometheus.CounterVec // labels: status (ok|fail)
@@ -114,6 +123,18 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 				Name: "tts_call_total",
 				Help: "Total TTS API calls by provider and status.",
 			}, []string{"provider", "status"},
+		),
+		TTSCharsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "tts_chars_total",
+				Help: "Total CJK runes sent to TTS by duration slot. Cost basis.",
+			}, []string{"duration_min"},
+		),
+		TTSCharsExcessTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "tts_chars_excess_total",
+				Help: "Cumulative runes ABOVE the duration slot's expected ceiling. Pure waste.",
+			}, []string{"duration_min"},
 		),
 		StorageUploadDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -222,6 +243,8 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 		b.ExternalAPIErrorTotal,
 		b.TTSCallDuration,
 		b.TTSCallTotal,
+		b.TTSCharsTotal,
+		b.TTSCharsExcessTotal,
 		b.StorageUploadDuration,
 		b.AudioPendingCount,
 		b.AudioReadyTotal,
