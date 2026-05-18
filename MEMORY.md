@@ -185,6 +185,7 @@
 - **2026-05-16** — Plan 9-A 完成：第一个 Flutter 客户端 4 屏（login/home/generate/player）跑通，真 OPPO PJJ110 手机端到端听到爱宝为小宇讲故事；Plan 8 storyline 连续感在 player 屏首次被终端用户看见
 - **2026-05-14** — Plan 9b 完成：BOOTSTRAP / HEARTBEAT / 故事历史 / storyline 续集 UI / 新孩子创建 / nickname UTF-8 守门全部落地。修了 4 个 Riverpod/dio 状态管理坑（authProvider↔apiClient 循环依赖 / childProvider 跨 session 缓存 / 401 反馈环 / storyListProvider 无声缓存）+ 限流误伤读接口 + SMS GETDEL 反 UX。同日开 Plan 9c 第一战："故事质量"：时长系数 120→320 字/分钟、prompt 硬约束 ±10%、字数长度保护反馈式重写 ×2、SceneSeed 池 80 个种子破同质化、挡位 5/10/15→3/5/8、续集连续性 hard→warn-only、超时栈整体上调。5min 实测已稳定 4:30–5:30；8min 仍偶尔走 fallback（红线词单字「砍」「刺」误伤）
 - **2026-05-15** — Plan 9c 第二战：内容过滤分级宽容化。系统清理 9 个误伤红线词（血/砍/杀/鬼/性/惩罚/天堂/诡异/吓人），把 horror + negative_values 整类降级为 warn-only，violence/sexual/political/dangerous_imitation 保留 hard-fail。修复"同 prompt 产同故事"——user role 末尾追加 SceneSeed + 多样性 mandate + 16-hex nonce 三件套破 Doubao prompt 缓存。长度保护阈值 70%→85%。15 个故事抽样实测：fallback 率 7%（从昨天 ~30%），SceneSeed 15/15 全唯一，平均 ~62s/故事。意外发现 PreCheck 拦反义教育 prompt（"不要嘲笑别人" → 400），明天专攻。AVD 替代 MuMu（MuMu profile 飘+adb reverse 自掉）。
+- **2026-05-18** — Plan 9c 第三战：PreCheck 对称引入 category 分级（horror+negative_values warn-only），"不要嘲笑别人"等反义教育 prompt 不再 400。RuleSet 加 `WordToCategory` 反查索引，PreCheck/PostCheck 共享。新加 `cmd/rules-lint` 词表 lint 工具（make rules-lint）。字数系数 320→280 + 区间 ±10%→±5%，5min 实测 5/5 落在 4:31–5:07。新增 TTS 成本 metric (`tts_chars_total{duration_min}` + `tts_chars_excess_total{duration_min}`) 监控超长浪费。8min 专题验证 10 个故事，平均 6:30 / 命中率 5/10——LLM 写到 1500 字就刹车是 Doubao 训练偏好硬墙，结构化 prompt 引导无显著改善，接受现状。
 
 ## 关键技术教训（来自实施过程）
 
