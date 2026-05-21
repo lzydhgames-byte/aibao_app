@@ -24,10 +24,11 @@ Plan 9c 进行中（05-14 第一战 / 05-15 第二战 / 05-18 第三战）：
 
 **Plan 9d 完成（2026-05-18）**：全量回归冒烟 13/13 通过。Plan 9 大系列（9-A/9b/9c/9d）整体收官——从"刚跑通"到"稳定可演示"，从登录到听完个性化故事的完整闭环 100% 可工程化交付。脚本 `scripts/plan9d-api-smoke.ps1` + `scripts/plan9d-ui-via-api.ps1` 留作日后回归检查工具。
 
-**Plan 10 部署 Day 1（2026-05-18）完成度 92%**：腾讯云香港轻量 2C4G + Ubuntu 24.04 + Docker PG/Redis（复用前项目）+ Go 1.23 + systemd + Nginx + Let's Encrypt + 域名 `aibao.dhgames.com` + release APK 50MB 在线下载。**真机端到端**走通：扫码下载（绕开微信，用手机浏览器输 URL）→ 安装 → 登录 → 文本生成 ✅ → TTS 合成 ✅ → **COS 上传 ❌ TLS handshake timeout（香港→上海大文件链路）**。
+**Plan 10 部署完成（Day 1 2026-05-18 + Day 2 2026-05-21）**：腾讯云香港轻量 2C4G + Ubuntu 24.04 + Docker PG/Redis（复用前项目）+ Go 1.23 + systemd + Nginx + Let's Encrypt + 域名 `aibao.dhgames.com` + release APK 50MB 在线下载。**真机端到端 100% 走通**：手机浏览器直输 URL 下载 APK（绕开微信/国产 ROM 拦截）→ 安装 → 登录 → 文本生成 ✅ → TTS 合成 ✅ → COS 上传 ✅ → 签名 URL 播放 ✅。
 
-未解决（明天 Day 2 必修）：5MB 文件 PUT 到 `cos.ap-shanghai.myqcloud.com` 在 TLS 握手阶段卡死，小文件秒过。怀疑链路网络层问题。**方案**：换 COS bucket 到 ap-guangzhou 或 ap-hongkong region。
-当前下一步：明天 Plan 10 Day 2 — 见 `docs/devlog/2026-05-18-plan-10-deploy-day1.md` 末尾接力卡。
+Day 2 修完 COS 上传"三层洋葱"故障：① 网络层——香港→上海跨地域 TLS 卡死 → 换桶到 `aibao-audio-hk`（ap-hongkong 同地域）② 权限层——新桶 403 AccessDenied，发现 env 密钥属另一账号 → 换主账号密钥 ③ 操作层——旧 SecretKey 不可二次查看 → 新建密钥。3 个故事音频一次性全部 `ready`。详见 `docs/devlog/2026-05-21-plan-10-deploy-day2.md`。
+
+Plan 10 收官：朋友可拿手机直接试用爱宝。
 
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)

@@ -184,6 +184,33 @@ codeStore.Consume(ctx, phoneHash)           // 对的才删
 
 **何时引入**：Plan 9c 第二战收尾发现 / 第三战待修。
 
+## 10.14 云存储 4xx 错误码三分法 + SecretKey 一次性显示
+
+**一句话**：对象存储（COS / S3 / OSS）拒绝你时，`InvalidAccessKeyId`、`SignatureDoesNotMatch`、`AccessDenied` 是三个完全不同的错误，指向三种不同的修法——看错误码比看 Message 文字更可靠。
+
+**三分法对照**：
+
+| 错误码 | 含义 | 修法 |
+|---|---|---|
+| `InvalidAccessKeyId` | 这把密钥根本不存在 / 拼错了 | 检查 SecretId 是否填错、是否被删 |
+| `SignatureDoesNotMatch` | 密钥存在，但签名算错了 | 检查签名算法、SecretKey、时钟、待签字符串拼装 |
+| `AccessDenied` | 密钥对、签名也对，但**这把密钥没有这个资源的权限** | 换有权限的密钥，或给资源加授权策略 |
+
+**生活类比**：进小区门禁——
+- `InvalidAccessKeyId` = 你刷的卡是张废卡/假卡
+- `SignatureDoesNotMatch` = 卡是真的但你刷反了/消磁了
+- `AccessDenied` = 卡是真的、也刷对了，但这张卡没开通这栋楼的权限
+
+**为什么需要**：三个错误长得像（都是"被拒"），但乱猜会浪费大量时间。爱宝 Plan 10 Day 2 实战：换新 COS 桶后报 403 `AccessDenied`——因为是 `AccessDenied` 而不是 `InvalidAccessKeyId`，立刻能断定"密钥本身有效，只是没这个新桶的权限"，直接去查密钥归属，而不是浪费时间核对 SecretId 有没有打错一位。
+
+**配套陷阱：SecretKey 只显示一次**。腾讯云、AWS、阿里云的 SecretKey 都只在「新建密钥」那一刻显示一次，关掉弹窗后永久不可查看（安全设计，防反复偷看）。
+- **正确做法**：新建时立刻「下载 CSV」或直接写进配置文件
+- **丢了怎么办**：只能作废重建，没有"找回"
+
+**配套陷阱：云存储桶按账号归属**。COS 桶名尾号 = 持有账号的 APPID（如 `aibao-audio-hk-1356733768` ↔ APPID `1356733768`）。换桶时，访问密钥也必须换到同一个账号的密钥——不同账号的密钥访问会 403。
+
+**何时引入**：Plan 10 Day 2 修 COS 上传"三层洋葱"故障时（网络层 → 权限层 → 操作层）。
+
 ## 即将引入
 
 - **双层安全链路**（前置 PreCheck + 后置 PostCheck，技术架构第 7 章）
