@@ -238,16 +238,26 @@ CREATE INDEX idx_outline_events_user_day ON outline_events(user_id, occurred_at)
 ```
 
 **写入时机**：
-- `preview` 成功 → `outcome=pending`
-- `refresh` → 旧 outline 写 `outcome=refreshed`，新 outline 写 `outcome=pending`
-- `/stories/generate` 接受 outline_id → 旧 outline 写 `outcome=accepted`
-- TTL 过期由 housekeeping 后台扫描 Redis 缺失但 outline_events 仍 `pending` → 改 `outcome=expired`
+- `preview` 成功 → `outcome=pending`（同步 PG INSERT）
+- `refresh` → 旧 outline 写 `outcome=refreshed`，新 outline 写 `outcome=pending`（同事务）
+- `/stories/generate` 接受 outline_id → 旧 outline 写 `outcome=accepted`（在 Orchestrator step 0 校验通过后立即写，与故事生成在同一请求生命周期）
+- **TTL 过期识别**（A2 修正——不裸依赖 Redis TTL 推断）：
+  1. **主动驱动**（主路径）：用户每次进 `/stories` list 或 `/heartbeat` 时，后端顺手扫该 user 名下 `outcome=pending` 且 `occurred_at < now - 5min30s` 的行 → 改 `outcome=expired`
+  2. **兜底 housekeeping**（每 10 分钟一次）：扫全表 `outcome=pending AND occurred_at < now - 10min` → 改 `expired`，处理无活跃用户的孤儿
+  3. 两条路径用 SQL `UPDATE ... WHERE outcome='pending'` 保证幂等
 - `abandoned` 无显式信号，由 `expired` 兜底
 
 **与 cost_events 的关系**：
 - `outline_events` 关心生命周期（outcome）
 - `cost_events` 关心钱（per LLM call）
 - 同一 outline_id 在两表都有记录；JOIN by outline_id
+
+**双表写入顺序与一致性**（N1）：
+- `outline_events` **同步**写 PG（小行级 INSERT，事务内随主业务一起提交；失败则 outline preview 整体失败）
+- `cost_events` **异步**经 Recorder 队列 → flusher 批量写（详 11B §3.3）
+- **JOIN 口径**：报表与对账以 `outline_events` 为权威生命周期数据；`cost_events` 缺行视为"待补"（最多滞后 1 分钟 batch + 5s 关停 flush）
+- **不一致监控**：定时 job 每小时扫"过去 24h 内 outline_events 有 outcome=accepted 但 cost_events 找不到对应 outline LLM call"的孤儿 → 写 metric `cost_outline_join_miss_total`；持续 >0.5% 触发告警
+- 双表**不共享事务**——cost_events 写失败不能回滚 outline 状态（钱已经花了）
 
 ## 6. API 契约
 
@@ -338,6 +348,7 @@ CREATE INDEX idx_outline_events_user_day ON outline_events(user_id, occurred_at)
 | HTTP | code | 含义 |
 |---|---|---|
 | 400 | `bad_request` | 参数缺失/格式错 |
+| 400 | `conflicting_modes` | 同时传 outline_id + storyline_id（互斥，见 §6.6 + §10.1） |
 | 403 | `forbidden` | child_id/outline_id ownership 不一致 |
 | 404 | `not_found` | outline_id 不存在或不属于此 user |
 | 410 | `outline_expired` | outline TTL 到期 / Redis 缺失 |
@@ -352,10 +363,12 @@ CREATE INDEX idx_outline_events_user_day ON outline_events(user_id, occurred_at)
 
 | 请求形态 | 处理 |
 |---|---|
-| 有 `outline_id`（无论是否带旧字段） | **必须**走新路径；旧字段（duration_min/style/topic/prompt）**全部忽略**，日志记录混传告警 |
-| 无 `outline_id`，有旧字段全集 | 走旧路径（兼容期） |
-| 无 `outline_id`，旧字段不完整 | 400 `bad_request` |
-| 有 `outline_id` 但 Redis 拿不到 | **410 Gone**，不 fallback 旧路径——若 fallback，"用户确认的 A 实际生成 B" 风险出现 |
+| **同时**带 `outline_id` **和** `storyline_id` | **400 `conflicting_modes`** — 模式互斥，客户端二选一（见 §10.1） |
+| 有 `outline_id`（无 storyline_id，无论是否带旧字段） | **必须**走新路径；旧字段（duration_min/style/topic/prompt）**全部忽略**，日志记录混传告警 |
+| 有 `storyline_id`（无 outline_id） | 走续集路径（Plan 8），跳过大纲（见 §10.1） |
+| 无 `outline_id` 也无 `storyline_id`，有旧字段全集 | 走旧路径（兼容期） |
+| 无 `outline_id` 也无 `storyline_id`，旧字段不完整 | 400 `bad_request` |
+| 有 `outline_id` 但 Redis 拿不到 | **410 `outline_expired`**，不 fallback 旧路径——若 fallback，"用户确认的 A 实际生成 B" 风险出现 |
 
 ### 6.7 弃用计划
 
@@ -431,20 +444,59 @@ in.EducationalValueHint = outline.EducationalValue
 
 详见 §6.4：outline 端点共享 **per-user 5/min**；story generate 保持 5/min。
 
-### 7.5 OutlineResolver 接口（解耦 service/story 与 service/outline）
+### 7.5 OutlineResolver 接口（包级解耦，N5 修正）
 
-`service/story/Orchestrator` 不直接访问 Redis 或 `service/outline/cache`。引入小接口 `OutlineResolver`：
+`service/story/Orchestrator` 不直接访问 Redis 或 `service/outline/cache`。引入小接口 `OutlineResolver`。
+
+**接口位置**（N5 关键）：放在**独立中立包** `internal/service/outlinecontract/`，**不**放在 `service/outline/`——否则 `service/story` 仍要 `import "service/outline"`，包级双向依赖。
+
+```
+internal/service/
+├── outlinecontract/         ← 中立合约包（只有接口 + DTO，无实现、无 IO）
+│   ├── resolver.go          OutlineResolver interface + Outline DTO
+│   └── errors.go            ErrOutlineExpired / ErrOutlineForbidden / ErrOutlineNotFound
+│
+├── outline/                 ← 实现方
+│   └── resolver_impl.go     实现 OutlineResolver（内部读 Redis + 校验 ownership）
+│
+└── story/                   ← 消费方
+    └── orchestrator.go      import "service/outlinecontract"（不 import "service/outline"）
+```
 
 ```go
-// 位于 service/outline/contract.go（小接口，便于 mock）
+// service/outlinecontract/resolver.go
+package outlinecontract
+
+type Outline struct {
+    OutlineID, Title, Synopsis, Style, EducationalValue string
+    Themes []string
+    SceneSeed string
+    OutlineGroupID, ParentOutlineID string
+    VariantIndex int
+    OutlinePromptVersion string
+}
+
 type OutlineResolver interface {
     Resolve(ctx context.Context, outlineID string, userID, childID int64) (*Outline, error)
 }
 ```
 
-`service/outline/` 实现这个接口（内部读 Redis + 校验 ownership + 校验 outline_events 状态非 expired/refreshed/accepted）。`service/story/` 在构造时注入 `OutlineResolver`，**不知道**底层是 Redis 还是别的存储。
+**main wire**（main.go）：
+```go
+outlineCache := outlinecache.New(redis)              // service/outline 子包
+outlineResolver := outline.NewResolver(outlineCache) // 实现 outlinecontract.OutlineResolver
+orchestrator := story.NewOrchestrator(... , outlineResolver)
+```
 
-这给后续把 outline 迁出 Redis（例如改用 pebbledb 或外部 KV）零成本——`service/story/` 不动。
+**收益**：
+- `service/story` 包**仅依赖** `service/outlinecontract`，不依赖 `service/outline`——编译期保证单向
+- 测试 `service/story` 可用 mock OutlineResolver，零 outline 实现依赖
+- 未来把 outline 迁到外部 KV（pebbledb / etcd / 自建 service），只换 `service/outline/resolver_impl.go` + main wire，`service/story` 不动
+
+**反模式（避免）**：
+- ❌ 把接口放在 `service/outline/contract.go`——`service/story` 仍要 import `outline` 包
+- ❌ 把接口放在 `service/story/`——倒挂依赖，outline 实现要 import story
+- ✅ 独立中立包是唯一干净解
 
 ## 8. Flutter UI 改动
 
@@ -522,13 +574,16 @@ home → generate（输入）→ outline（预览）→ player（正文等待）
 
 ### 10.1 与 Plan 8 storyline（连续剧）
 
-**规则**：续集模式（`storyline_id` 字段非空）**跳过大纲阶段**。理由：续集已通过 `chapter_hook` + 上集 summary 隐式承接，再加大纲会双重设定且容易冲突。
+**规则**：续集（`storyline_id` 非空）与大纲（`outline_id` 非空）**严格互斥**。理由：续集已通过 `chapter_hook` + 上集 summary 隐式承接，再加大纲会双重设定且容易冲突；语义二义性会让 spec/客户端/测试同时变复杂。
 
-- Flutter 端：home 页"续集卡片"点进去直接进 generate 接口，不经 outline 流程
-- 后端：`/stories/generate` 收到 `storyline_id` 非空时，即使带 `outline_id` 也**忽略 outline_id 走续集路径**（且记 warning log）
-- `cost_events` purpose 记 `story`，不记 outline 相关；`outline_events` 不写入
+**契约**（与 §6.6 一致）：
+- Flutter 端：home 页"续集卡片"点进去直接进 generate 接口（仅传 `storyline_id`），不经 outline 流程
+- Flutter 端：generate 输入页"让爱宝想想"路径仅传 `outline_id`（无 storyline_id）
+- 后端：`/stories/generate` 收到**同时**含 `outline_id` 和 `storyline_id` → 立即返 **400 `conflicting_modes`**（**不**做"哪个优先"猜测，让客户端显式二选一）
+- 续集路径（仅 storyline_id）：`cost_events` purpose 记 `story` + storyline_id 关联，**不**写 `outline_events`
+- 大纲路径（仅 outline_id）：正常走 §5/§6 + outline_events 完整生命周期
 
-**未来扩展**：续集启用大纲需另起子 plan（11C？），需解决 "上集承接 + 大纲设定" 双约束冲突，超本期。
+**未来扩展**：续集启用大纲需另起子 plan（11C？），需先解决 "上集承接 + 大纲设定" 双约束的产品体验冲突，超本期。
 
 ### 10.2 与 BOOTSTRAP 害怕清单
 
