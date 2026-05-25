@@ -217,6 +217,19 @@ value: JSON.stringify({
 
 ### 5.5 outline_events 轻量事件表
 
+**实施口径声明**（T3）：`outline_events` 是 **append-only 事件流**，**不**对历史行做 UPDATE。每次状态变化追加一行新事件，`outline_id` 在表中允许多行；最新生命周期由"按 occurred_at 取最后一行"得出。
+
+**为什么 append-only 而非 mutable-state**：
+- 与现有 `outbox_events` 模式一致（Plan 4 已立的范式），团队心智成本低
+- 历史轨迹可审计（refresh 几次、何时 expired 全在表里）
+- 报表 JOIN 一律走 `SELECT DISTINCT ON (outline_id) ... ORDER BY outline_id, occurred_at DESC` 拿"最新生命周期"，避免 double count
+- expired 也是追加一行（不是改 pending 行的 outcome），housekeeping 同理
+
+**例外 — A2 expired 双路径的 SQL 形态**：
+- ❌ **不要**用 `UPDATE outline_events SET outcome='expired' WHERE outcome='pending' AND ...`
+- ✅ 用 `INSERT INTO outline_events (...outcome='expired'...) SELECT ... WHERE NOT EXISTS (SELECT 1 FROM outline_events WHERE outline_id=X AND outcome IN ('accepted','refreshed','expired'))`
+- 即"该 outline_id 还没有终态行 → 追加一条 expired"；幂等且无锁竞争
+
 不建完整 outline 主表，但需要轻量"生命周期事件"用于成本与运营分析：
 
 ```sql
