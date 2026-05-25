@@ -193,7 +193,13 @@ aibao-server/
 │       ├── errors/
 │       ├── traceid/
 │       ├── safehash/             敏感字段脱敏
-│       └── cost/                 [Plan 11B 新增] 成本计算（tokens/chars → 元，从 config 单价表）
+│       ├── idhash/               [Plan 11B 新增] HMAC-SHA256 截断 12 hex + domain separation
+│       └── cost/                 [Plan 11B 新增] PriceBook + Calculator（tokens/chars → 元）
+├── cmd/
+│   ├── aibao-server/             API + Worker 单体
+│   ├── safetycheck/              安全 CLI（Plan 3）
+│   ├── rules-lint/               词表 lint（Plan 9c）
+│   └── cost-report/              [Plan 11B 新增] 成本汇总报表 CLI
 ├── config/
 │   ├── config.dev.yaml
 │   └── config.yaml.example       入 git；真实配置不入 git
@@ -224,9 +230,24 @@ type Client interface {
     Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error)
     HealthCheck(ctx context.Context) error
 }
+
+// Plan 11B 起 GenerateResponse 必须返回 Usage（tokens/duration_ms 原始数据）
+// 但 Gateway 自己不调用 service.cost.Recorder——分层约束（见 3.5）
 ```
 
 > 🎓 **依赖倒置原则（DIP）**：高层依赖抽象不依赖具体。换 LLM 提供商只新增实现文件。
+
+### 3.5 分层强约束（Plan 11B 起执行）
+
+```
+api      ─► service ─► repository / gateway / pkg
+gateway  ─► pkg                              ← gateway 不依赖 service / repository
+pkg      ─► （无）                           ← pkg 是最内层无 IO 核
+```
+
+**反向依赖编译期 enforce**：CI 跑 `go list -deps ./internal/gateway/...` 检查无 `internal/service` / `internal/repository` 出现。任何破坏分层的 PR 拒绝合入。
+
+**Recorder 调用位置**：业务方（`service/story`, `service/outline`）拿到 Gateway 返回的 Usage → 显式调 `service/cost/Recorder.Record(evt)`。**不在 Gateway 拦截器/中间件里偷偷调**——破坏可读性 + 分层。
 
 ### 3.4 main.go 启动流程
 

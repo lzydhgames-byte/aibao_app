@@ -33,7 +33,7 @@
 - ❌ **大纲入主库 PostgreSQL**——大纲是临时态，存 Redis 5 分钟 TTL 即可
 - ❌ **多轮大纲对话**（"再换个角度"循环 N 次）——一次预览 + 一次调整就够，再不满意让用户改输入
 - ❌ **大纲多语言/多文案模板**——一套中文模板足够
-- ❌ **大纲 PostCheck**（恐惧词/主角校验等）——大纲是给家长看的预览，不是给孩子的内容；PreCheck 保留即可
+- ❌ **大纲 PostCheck 完整版**——跳过 PostCheck 的"主角占比"等正文专属校验。**但**：必须跑 §5.3 定义的 OutlineSafetyCheck（轻量）—— 大纲虽然给家长看，但 title/synopsis/educational_value 仍可能含恐惧词、IP 同人化错位、主角错位，不能裸过
 
 ## 3. 用户流程（新旧对比）
 
@@ -168,11 +168,86 @@
 ### 5.2 Redis 缓存键
 
 ```
-outline:{outline_id}     (UUID, 5min TTL)
-value: JSON.stringify({outline 字段 + child_id + prompt 文本 + created_at})
+outline:{outline_id}     (UUID v4, crypto-random 128bit, 5min TTL)
+value: JSON.stringify({
+    outline_fields,
+    user_id,                  ← 用于 ownership 校验
+    child_id,                 ← 用于 ownership 校验
+    prompt_text,
+    outline_prompt_version,   ← 用于 A/B 与质量回放（见 §5.4）
+    outline_group_id,         ← 同一意图的所有 outline 共享（refresh 后变体共组）
+    variant_index,            ← 本组内序号（0 起，refresh 递增）
+    parent_outline_id,        ← refresh 来源（首次预览为空）
+    created_at
+})
 ```
 
-`outline_id` 是仅用于一次性确认的票据；过期后 `/stories/generate` 拿不到 outline，**返回 400 让用户重新预览**（这是故意设计——逼用户在 5 分钟内决定，否则大纲信息可能已和当时心情脱节）。
+**outline_id 设计**：crypto-random UUID v4，128 bit。短期票据可猜性近似为零。**outline_id 严禁出现在 access log / metric label / 错误响应正文里**（错误体只回 reason code，不回 ID）。
+
+**Ownership 校验（强制）**：`/stories/generate` 拿到 outline_id 后必须校验 **user_id + child_id + outline_id 三元一致**。任一不一致返 403。
+
+**过期处理**：5 分钟无操作 Redis TTL 失效；`/stories/generate` 拿不到 outline → 返 **410 Gone**（不是 400，下文 §6.5 错误码统一）。**绝不自动重新生成大纲冒充用户确认**——这违反"用户确认的是 A，实际生成的也必须是 A"的承诺。
+
+**Redis 不可信假设**：Redis AOF/重启可能丢失大纲——视为"过期同等处理"，前端引导用户重新预览。**不依赖 Redis TTL 推断 outline outcome 事件**——outcome 由显式 API 调用驱动写入 `outline_events`（见 §5.5）。
+
+### 5.3 OutlineSafetyCheck（轻量大纲安全校验）
+
+**输入端**（PreCheck 之前 / 之内）：复用 `gateway/safety` PreCheck 跑用户 `prompt` 文本——红线词、害怕清单（含本 child profile 的个性化害怕词，从 [[bootstrap-fears]] 记忆拿）、IP 黑名单。
+
+**输出端**（LLM 返回 JSON 之后，写 Redis 之前）：跑 `OutlineSafetyCheck(outline)`，覆盖：
+1. `title` + `synopsis` + `educational_value` 三字段拼接后跑红线词扫描（reuse `gateway/safety` matcher）
+2. `title` + `synopsis` 跑 child 个性化害怕词扫描
+3. 主角校验：synopsis 必须含 child nickname（命中失败 → reject reason=`protagonist_missing`）
+4. IP 同人化：synopsis 命中 IP 黑名单走转写规则；命中 IP 白名单（如奥特曼）走"陪伴角色而非主角"语义验证（启发式：主角 ≠ IP 名）
+
+**安全失败处理**：
+- 命中 → 不写 Redis，返 **422** + `reject_reason` + `category`
+- 单次 LLM 返回的 outline 安全失败 → **允许 1 次自动 repair**：重发 LLM，附加 "请避免出现 X 类内容" hint。仍失败则用户侧报错。
+- 重试次数计入 `outline_safety_repair_total` metric
+
+### 5.4 大纲 prompt 版本化
+
+`outline_prompt_version` 是 `vYYYYMMDD-N` 格式字符串（如 `v20260525-1`），由 prompt 模板代码内常量定义。每次模板变更 bump 版本号。
+
+**用途**：
+- Redis payload 记录
+- 写入 `outline_events` + `cost_events`
+- 日志结构化字段
+- 未来 A/B 实验按 version 分桶
+
+### 5.5 outline_events 轻量事件表
+
+不建完整 outline 主表，但需要轻量"生命周期事件"用于成本与运营分析：
+
+```sql
+CREATE TABLE outline_events (
+    id              BIGSERIAL PRIMARY KEY,
+    occurred_at     TIMESTAMPTZ NOT NULL,
+    outline_id      VARCHAR(64) NOT NULL,
+    outline_group_id VARCHAR(64) NOT NULL,
+    user_id         BIGINT NOT NULL,
+    child_id_hash   VARCHAR(64) NOT NULL,
+    outcome         VARCHAR(16) NOT NULL,  -- pending|accepted|refreshed|expired|abandoned
+    outline_prompt_version VARCHAR(32),
+    duration_min    INTEGER,
+    trace_id        VARCHAR(64)
+);
+
+CREATE INDEX idx_outline_events_group ON outline_events(outline_group_id);
+CREATE INDEX idx_outline_events_user_day ON outline_events(user_id, occurred_at);
+```
+
+**写入时机**：
+- `preview` 成功 → `outcome=pending`
+- `refresh` → 旧 outline 写 `outcome=refreshed`，新 outline 写 `outcome=pending`
+- `/stories/generate` 接受 outline_id → 旧 outline 写 `outcome=accepted`
+- TTL 过期由 housekeeping 后台扫描 Redis 缺失但 outline_events 仍 `pending` → 改 `outcome=expired`
+- `abandoned` 无显式信号，由 `expired` 兜底
+
+**与 cost_events 的关系**：
+- `outline_events` 关心生命周期（outcome）
+- `cost_events` 关心钱（per LLM call）
+- 同一 outline_id 在两表都有记录；JOIN by outline_id
 
 ## 6. API 契约
 
@@ -196,14 +271,17 @@ value: JSON.stringify({outline 字段 + child_id + prompt 文本 + created_at})
 }
 ```
 
-**错误**：
-- 400：PreCheck 拒绝（红线词/恐惧词命中），返回 `reject_reason` + `category`
-- 400：duration_min 非 [3,5,8]
-- 429：限流（per-user 10/min，比 generate 宽，因为是只读式探索）
+**错误**（统一信封见 §6.5）：
+- **400** `bad_request`：duration_min 非 [3,5,8] / 必填字段缺失
+- **403** `forbidden`：child_id 不属于当前 user
+- **422** `safety_rejected`：PreCheck 或 OutlineSafetyCheck 拒绝，body 含 `category` + `reason_code`
+- **429** `rate_limited`：限流（详见 §6.4），含 `retry_after` 秒数
 
 ### 6.2 新增：`POST /api/v1/outlines/:id/refresh`
 
-"换个角度"。同 child_id + prompt + duration，但 nonce 不同破缓存。响应同 6.1。
+"换个角度"。同 child_id + prompt + duration，但 nonce 不同破缓存。响应同 6.1。**`:id` 必须存在且属于当前 user**——不存在/不属于返 **404**（含义统一为"找不到资源"）。
+
+新 outline 与原 outline **共享 `outline_group_id`**，`variant_index` 递增，`parent_outline_id` 指向原。原 outline 在 Redis 立即失效；`outline_events` 写一行 `outcome=refreshed`。
 
 ### 6.3 微改：`POST /api/v1/stories/generate`
 
@@ -229,7 +307,57 @@ value: JSON.stringify({outline 字段 + child_id + prompt 文本 + created_at})
 
 **优先级**：`outline_overrides` > `outline.字段` > 旧手填字段 > 默认值。这让前端可以**同时**走新路径，过渡期内旧客户端不受影响。
 
-### 6.4 弃用计划
+### 6.4 限流策略
+
+全部 outline LLM 调用走**统一桶**（避免 preview + refresh 分桶用户实际能打 15 次/min）：
+
+| 端点 | 限流 |
+|---|---|
+| `/outlines/preview` + `/outlines/:id/refresh` | 共用桶 **per-user 5/min**（首发） |
+| `/stories/generate` | 保持原 5/min |
+
+**调优计划**：上线后跑 1 周看 `outline_preview_total` + `outline_refreshed_total` 真实分布。如朋友试用普遍打不满 5/min 且 refresh 率 <30%，下期放宽到 8/min；如 refresh 率 >50% 暗示大纲质量差需治本，不靠限流。
+
+### 6.5 统一错误信封
+
+所有 outline 端点返回**统一 JSON 信封**，便于前端区分 UX 状态：
+
+```json
+{
+  "error": {
+    "code": "outline_expired",         // 机器可读，前端按此分支
+    "message": "大纲已过期，请重新预览",   // 用户可见文案
+    "category": "fears_personalized",  // 可选，安全拒绝时填
+    "retry_after": 42                  // 可选，限流时填（秒）
+  }
+}
+```
+
+**状态码 ↔ code 对照**：
+
+| HTTP | code | 含义 |
+|---|---|---|
+| 400 | `bad_request` | 参数缺失/格式错 |
+| 403 | `forbidden` | child_id/outline_id ownership 不一致 |
+| 404 | `not_found` | outline_id 不存在或不属于此 user |
+| 410 | `outline_expired` | outline TTL 到期 / Redis 缺失 |
+| 422 | `safety_rejected` | PreCheck 或 OutlineSafetyCheck 命中（含 `category`）|
+| 429 | `rate_limited` | 限流（含 `retry_after`）|
+| 500 | `llm_failed` | LLM 调用/JSON 解析失败 |
+| 503 | `budget_exceeded` | 全局预算熔断（已有） |
+
+### 6.6 新旧路径并存规则
+
+为防"旧/新字段混传"导致语义模糊，**强制规则**：
+
+| 请求形态 | 处理 |
+|---|---|
+| 有 `outline_id`（无论是否带旧字段） | **必须**走新路径；旧字段（duration_min/style/topic/prompt）**全部忽略**，日志记录混传告警 |
+| 无 `outline_id`，有旧字段全集 | 走旧路径（兼容期） |
+| 无 `outline_id`，旧字段不完整 | 400 `bad_request` |
+| 有 `outline_id` 但 Redis 拿不到 | **410 Gone**，不 fallback 旧路径——若 fallback，"用户确认的 A 实际生成 B" 风险出现 |
+
+### 6.7 弃用计划
 
 旧路径（不带 `outline_id`）在 Plan 11A 上线后保留 **2 个 minor 版本**，第 3 个版本后端开始返回 `Deprecation` header，第 5 个版本下线。
 
@@ -247,46 +375,76 @@ internal/service/outline/
 ```
 
 **Preview 流程**：
-1. PreCheck（复用 `gateway/safety`，**完整跑**——不能跳过）
-2. 调 `gateway/llm` Generate，传 `purpose=outline` label（给 Plan 11B 成本归类用）
-3. 解析 JSON → 校验 enum/长度
-4. 注入 scene_seed（后端选，不让 LLM 自由发挥）
-5. 写 Redis，返 outline_id
+1. **输入安全**：PreCheck on user `prompt`（复用 `gateway/safety`，**完整跑**——含个性化害怕词、IP 黑白名单）
+2. **LLM 调用**：调 `gateway/llm` Generate，`response_format=json`，附 `purpose=outline` + `outline_prompt_version` label（成本/质量归类用）
+3. **JSON 解析**：严格 schema 校验（unknown field 拒绝） + enum/长度校验
+4. **JSON 修复重试**：若 schema 失败 → 1 次 repair retry（提示模型"上次返回缺少字段 X / 字段 Y 越界"）；仍失败返 500 `llm_failed`
+5. **输出安全**：跑 OutlineSafetyCheck（见 §5.3）on `title` + `synopsis` + `educational_value`；失败 → 1 次 repair retry；仍失败返 422 `safety_rejected`
+6. **后端注入**：scene_seed（后端选，不让 LLM 自由发挥）+ outline_prompt_version + group/variant 元数据
+7. **持久化**：写 Redis（含 ownership 字段，见 §5.2） + 写 `outline_events` outcome=pending → 返 outline_id
 
-### 7.2 LLM 模型选型
+**Gateway 不调 Recorder**（架构分层修正）：`gateway/llm` 在响应中**只返 usage struct**（tokens_in/out/duration_ms）；由 `service/outline/` 拿到响应后调 `service/cost/Recorder.Record`。这保证 `gateway/*` 仅依赖 `pkg/*`，不依赖 `service/*`。
+
+### 7.2 LLM 模型选型 + 成本估算
 
 **大纲调用走 doubao-1.5-lite-32k**（已用于 memory summary 和 chapter hook）：
-- 输入 ~600 token + 输出 ~400 token
-- 单次 ~0.005 元，**比 doubao-pro 便宜 8-10 倍**
-- 大纲是结构化输出，对模型理解力要求中等，lite 够用
+- 输入 ~600 tokens + 输出 ~400 tokens（**估算值**，实际由 cost_events 校准）
+- 按 11B §5.2 单价（0.30/0.60 元/1M tokens）：单次大纲 ≈ `(600×0.30 + 400×0.60)/1_000_000 = ¥0.000420`
+- 比 doubao-pro 便宜约一个数量级；大纲是结构化输出，对模型理解力要求中等，lite 够用
 
-如果实测 lite 推断主题错率 >15%，第二期升 pro——这是个**可配置项**，不是硬编码。
+**口径声明**：上述数字仅为**预估**，单价以 Plan 11B Task 1（豆包/Minimax 官方计费单据校对）为准；实际成本以 `cost_events` 真实写入数据为准。spec 写死的任何元数字仅供方案论证，不作生产配置依据。
+
+如实测 lite 主题推断错率 >15% 或 OutlineSafetyCheck repair 率 >10%，第二期升 pro——这是 **可配置项**（config.yaml `outline.llm.model`），不是硬编码。
 
 ### 7.3 Orchestrator 微改
 
-在现有 5 步流水线**之前**新加一步：
+在现有 5 步流水线**之前**新加一步，**仅在 outline_id 存在**时启用；无 outline_id 走旧路径：
 
 ```go
-// step 0 (new)
-if in.OutlineID != "" {
-    outline := outlineCache.Get(in.OutlineID)
-    if outline == nil { return ErrOutlineExpired }
-    applyOverrides(outline, in.OutlineOverrides)
-    in.Style = outline.Style
-    in.Theme = outline.Themes[0]
-    in.SceneSeed = outline.SceneSeed
-    in.SynopsisHint = outline.Synopsis   // 喂给正文 prompt 做"承接"
+// step 0 (new, only when in.OutlineID != "")
+outline, err := outlineResolver.Resolve(ctx, in.OutlineID, in.UserID, in.ChildID)  // 见下 §7.5
+if err != nil {
+    if errors.Is(err, ErrOutlineExpired) { return Err410 }
+    if errors.Is(err, ErrOutlineForbidden) { return Err403 }
+    return Err500
 }
+applyOverrides(outline, in.OutlineOverrides)  // 仅白名单字段，见 §6.3
+in.Style         = outline.Style
+in.Themes        = outline.Themes
+in.SceneSeed     = outline.SceneSeed
+in.TitleHint     = outline.Title       // 喂正文 prompt（B1）
+in.SynopsisHint  = outline.Synopsis    // 喂正文 prompt（B1）
+in.EducationalValueHint = outline.EducationalValue
 // step 1..5: 原有流水线不动
 ```
 
-**关键设计**：正文 prompt 拿到 `SynopsisHint` 后，模板加一段"请把这个梗概展开为完整故事"——让大纲和正文**首尾呼应**，避免大纲说一套、正文写一套的撕裂感。
+**正文 prompt 模板新增段**（首尾呼应，防大纲/正文撕裂）：
+```
+## 本故事的预先设定（家长已确认）
+- 标题：{{.TitleHint}}
+- 梗概：{{.SynopsisHint}}
+- 教育意义目标：{{.EducationalValueHint}}
+请把以上设定作为故事骨架展开为完整故事，**不要偏离梗概的主要情节走向**。
+```
 
 ### 7.4 限流
 
-- Outline preview：per-user 10/min（探索性，放宽）
-- Outline refresh：per-user 5/min（防止用户疯狂换角度烧钱）
-- Story generate：保持原 5/min
+详见 §6.4：outline 端点共享 **per-user 5/min**；story generate 保持 5/min。
+
+### 7.5 OutlineResolver 接口（解耦 service/story 与 service/outline）
+
+`service/story/Orchestrator` 不直接访问 Redis 或 `service/outline/cache`。引入小接口 `OutlineResolver`：
+
+```go
+// 位于 service/outline/contract.go（小接口，便于 mock）
+type OutlineResolver interface {
+    Resolve(ctx context.Context, outlineID string, userID, childID int64) (*Outline, error)
+}
+```
+
+`service/outline/` 实现这个接口（内部读 Redis + 校验 ownership + 校验 outline_events 状态非 expired/refreshed/accepted）。`service/story/` 在构造时注入 `OutlineResolver`，**不知道**底层是 Redis 还是别的存储。
+
+这给后续把 outline 迁出 Redis（例如改用 pebbledb 或外部 KV）零成本——`service/story/` 不动。
 
 ## 8. Flutter UI 改动
 
@@ -326,14 +484,68 @@ home → generate（输入）→ outline（预览）→ player（正文等待）
 
 | 层级 | 范围 |
 |---|---|
-| 单元 | service/outline/ 每个函数 + JSON 解析容错 + cache TTL |
-| 集成 | testcontainers Redis + Mock LLM，跑 Preview 流水线 |
-| 端到端 | 真豆包 lite 跑 5 次 preview，人工验主题/风格/教育意义合理性 |
-| 回归 | Plan 9d smoke 脚本扩 1 项：outline → generate 链路通 |
+| 单元 | service/outline/ 每函数 + JSON 解析容错 + cache TTL + Resolver ownership 校验 + Overrides 白名单 |
+| 集成 | testcontainers Redis+PG + Mock LLM，跑 Preview→Generate 完整链路 |
+| 端到端 | 真豆包 lite 跑 5 次 preview，人工验主题/风格/教育意义合理性；TitleHint/SynopsisHint 注入正文后大纲与正文骨架是否一致 |
+| 回归 | Plan 9d smoke 脚本扩：outline preview→accepted→generate；refresh 切换；expired 410 路径 |
 
-**主观验收**：找你和你朋友各跑 5 个真实输入（"想听个温柔点的"/"明天考试想给孩子打气"/"小宇喜欢恐龙"），看大纲生成是否"懂用户"。这条没有自动化指标，靠人判。
+### 9.1 安全负例（必跑，每条都必须有 golden case）
 
-## 10. 上线策略 + 回滚
+| 场景 | 期望结果 |
+|---|---|
+| LLM 返回 title 含红线词 | OutlineSafetyCheck 拒，repair 1 次仍失败返 422 + category |
+| LLM 返回 synopsis 含 child fears（个性化害怕词） | 拒 + category=fears_personalized |
+| LLM 返回 synopsis 主角是奥特曼而非孩子 | 拒 + category=protagonist_missing |
+| LLM 返回 JSON schema 不合规（缺 themes 字段） | 1 次 repair；仍失败 500 llm_failed |
+| LLM 返回 duration_min 偷改成 10 | 服务端覆写为请求时 duration（or 拒，但更严格） |
+| LLM 返回 unknown 字段 | schema 拒 + repair |
+| outline_overrides 含 `child_id` 字段 | 400 bad_request（白名单外） |
+| 跨用户 outline 越权（user_A 的 outline 用 user_B 的 token confirm） | 403 forbidden |
+| 跨 child 越权（同 user 不同 child） | 403 forbidden |
+| outline_id 篡改/伪造 | 404 not_found（找不到） |
+| Redis 重启后 outline 丢失 | /stories/generate 返 410 outline_expired |
+| TTL 自然过期 | 410 outline_expired |
+| 限流并发触发 | 429 rate_limited + retry_after |
+
+### 9.2 兼容测试
+
+- 旧 Flutter 客户端（不带 outline_id）继续工作 → smoke 通过
+- 混传（带 outline_id 同时带 duration_min）→ 服务端忽略旧字段、走新路径、告警日志
+- 11A 与 Plan 8 storyline 续集互斥见 §10
+- 11A 与 BOOTSTRAP 害怕清单注入 PreCheck 见 §10
+
+### 9.3 主观验收
+
+找你和你朋友各跑 5 个真实输入（"想听个温柔点的"/"明天考试想给孩子打气"/"小宇喜欢恐龙"），看大纲是否"懂用户"。这条没自动化指标，靠人判。验收标准：5/5 中至少 4 个大纲让你"愿意点开始生成"。
+
+## 10. 现有功能兼容性
+
+### 10.1 与 Plan 8 storyline（连续剧）
+
+**规则**：续集模式（`storyline_id` 字段非空）**跳过大纲阶段**。理由：续集已通过 `chapter_hook` + 上集 summary 隐式承接，再加大纲会双重设定且容易冲突。
+
+- Flutter 端：home 页"续集卡片"点进去直接进 generate 接口，不经 outline 流程
+- 后端：`/stories/generate` 收到 `storyline_id` 非空时，即使带 `outline_id` 也**忽略 outline_id 走续集路径**（且记 warning log）
+- `cost_events` purpose 记 `story`，不记 outline 相关；`outline_events` 不写入
+
+**未来扩展**：续集启用大纲需另起子 plan（11C？），需解决 "上集承接 + 大纲设定" 双约束冲突，超本期。
+
+### 10.2 与 BOOTSTRAP 害怕清单
+
+`OutlineSafetyCheck` 输入端 PreCheck 跑用户 prompt 时，**必须**注入当前 child 的个性化害怕词（从 child profile / memory `[[bootstrap-fears]]` 取）。
+
+输出端 OutlineSafetyCheck on `title` + `synopsis` 同样要查个性化害怕清单——这是 §5.3 第 2 项的明文要求。
+
+### 10.3 与 HEARTBEAT 时段问候
+
+无冲突。HEARTBEAT 只读、不进大纲流程；home 页时段问候独立于 outline。
+
+### 10.4 与 Plan 9c 红线词/SceneSeed
+
+- 红线词：OutlineSafetyCheck 复用 `rules.yaml`（共享数据源，与 PostCheck 同一份）
+- SceneSeed：大纲 prompt **不让 LLM 选**，由后端注入；正文 prompt 沿用大纲选定的 seed（不重新抽）——这避免大纲是"海边"正文却"森林"的撕裂
+
+## 11. 上线策略 + 回滚
 
 ### 10.1 灰度
 
@@ -351,25 +563,42 @@ home → generate（输入）→ outline（预览）→ player（正文等待）
 新增 metric：
 - `outline_preview_total{status, child_id_hash}`
 - `outline_preview_duration_seconds`
-- `outline_confirmed_total` / `outline_refreshed_total` / `outline_expired_total`（确认率 / 换角度率 / 过期率）
+- `outline_outcome_total{outcome}`（accepted / refreshed / expired，对齐 §3.2 状态机）
+- `outline_safety_repair_total`（安全 repair 重试次数，超阈值告警）
 
 这些 metric 直接喂 Plan 11B 的成本视图。
 
-## 11. 涉及的现有文档更新
+## 12. 涉及的现有文档更新
 
 - `docs/superpowers/specs/2026-04-28-aibao-design.md`：3.3.4 节"故事生成流程"改写为新流程；2.1 节"操作者：家长"加一句"AI 协助理解需求"
-- `docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md`：4.1 服务目录加 `service/outline/`；时序图加大纲阶段；7.2 PreCheck 段标注"大纲调用复用 PreCheck，不跑 PostCheck"
+- `docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md`：4.1 服务目录加 `service/outline/`；时序图加大纲阶段；7.2 PreCheck 段标注"大纲调用复用 PreCheck + 增加 OutlineSafetyCheck 输出端校验"
 - `MEMORY.md` / `CLAUDE.md`：Plan 11A 落地后追加
 
-## 12. 风险与待定
+## 13. 风险与待定
+
+### 13.1 上线前 must-fix 风险
+
+| 风险 | 缓解 | 状态 |
+|---|---|---|
+| 大纲跳过完整 PostCheck 导致儿童害怕/IP 错位内容流向家长视野 | OutlineSafetyCheck（§5.3）+ 8 类安全负例 golden cases（§9.1） | **must-fix** |
+| outline_id 越权（跨 user / 跨 child） | Redis payload 含 user_id + child_id + 三元校验（§5.2） | **must-fix** |
+| outline_overrides 携带 child_id/prompt/duration 等敏感字段越权 | 白名单只 3 字段（§6.3）+ 后端强制校验 | **must-fix** |
+| outline_id 落入日志/metric label 被横向移动 | log/metric 严禁出现 outline_id 明文（§5.2） | **must-fix** |
+| 大纲 vs 正文调性脱节（家长看到 A，孩子听到 B） | Title/SynopsisHint 强制喂正文 prompt（§7.3） + 主观验收 | **must-fix** |
+| /stories/generate 旧/新字段混传引发歧义 | §6.6 强制规则：有 outline_id 则旧字段全部忽略 | **must-fix** |
+
+### 13.2 上线后观察 + 调优
 
 | 风险 | 缓解 |
 |---|---|
-| doubao-lite 主题推断不准（"奥特曼"→暴力？） | scene_seed 注入 + PreCheck + 实测后可升 pro |
-| 用户疯狂点"换个角度"烧钱 | per-user 5/min 限流 + Plan 11B 监控触发 |
-| 大纲生成失败影响主路径 | outline 失败时前端可"直接生成"（fallback 到旧路径） |
-| 大纲和正文调性脱节 | SynopsisHint 喂正文 prompt + 主观验收 5 次 |
+| doubao-lite 主题推断错率高 | scene_seed 注入 + 错率 >15% 升 pro（可配置） |
+| 用户疯狂点"换个角度"烧钱 | 统一桶限流 5/min（§6.4）+ 11B 监控触发 |
+| Redis AOF/重启导致 outline 大量丢失 | 视为正常 expired；前端引导重新预览 |
+| outline_prompt 改版后无法对比历史 | outline_prompt_version 全链路记录（§5.4） |
+| 单价漂移（豆包/Minimax 调价）导致历史成本不可比 | cost_events 记 price_version（11B §5）+ 历史只读不回放 |
 
-待定（非阻塞）：
-- 调整抽屉 UI 细节（这是 9b 已有的 picker 复用 vs 新做）
-- "换个角度"是否需要展示历史候选（"刚才那版/这版选哪个"）—— 倾向不做，YAGNI
+### 13.3 待定（非阻塞）
+
+- 调整抽屉 UI 细节（9b 已有的 picker 复用 vs 新做）
+- "换个角度"是否需要展示历史候选——倾向不做，YAGNI
+- 续集模式启用大纲（见 §10.1）——超本期
