@@ -146,20 +146,30 @@ aibao-server/
 │   │   ├── auth/
 │   │   ├── child/
 │   │   ├── story/                故事生成编排
-│   │   │   ├── orchestrator.go   主编排
+│   │   │   ├── orchestrator.go   主编排（Plan 11A 起 Step 0 = HydrateFromOutline）
 │   │   │   ├── prompt_builder.go Prompt 组装（System + User）
 │   │   │   ├── ip_normalizer.go  真实 IP 同人化归一化
 │   │   │   └── fallback.go       降级模板
+│   │   ├── outline/              [Plan 11A 新增] AI 大纲预览
+│   │   │   ├── service.go        Preview(ctx, in) 主编排
+│   │   │   ├── llm_prompt.go     大纲 LLM prompt 模板（doubao-lite）
+│   │   │   ├── llm_parser.go     response_format=json 解析 + enum 校验
+│   │   │   └── cache.go          Redis SET/GET（5min TTL）
 │   │   ├── memory/               九文件读写 + MEMORY 维护
 │   │   ├── safety/               双层安全
-│   │   │   ├── pre_check.go      输入预审
+│   │   │   ├── pre_check.go      输入预审（大纲调用复用，PostCheck 大纲跳过）
 │   │   │   ├── post_check.go     输出审核
 │   │   │   └── rules.go          红线规则
 │   │   ├── audio/                音频编排（TTS + BGM + 混音）
 │   │   │   ├── orchestrator.go
 │   │   │   ├── cue_parser.go     从 LLM 输出解析音效标记
 │   │   │   └── mixer.go          ffmpeg 混音
-│   │   └── budget/               预算熔断
+│   │   ├── cost/                 [Plan 11B 新增] 成本记账
+│   │   │   ├── recorder.go       Record(ctx, CostEvent) 同步 metric + 异步入队 PG
+│   │   │   ├── flusher.go        后台 goroutine 批量写 cost_events 表
+│   │   │   ├── aggregator.go     按 user/day/purpose 聚合查询
+│   │   │   └── report.go         CLI 报表渲染
+│   │   └── budget/               预算熔断（Plan 11B 后从 cost_yuan_total 派生 budget gauge）
 │   ├── gateway/                  抽象外部依赖
 │   │   ├── llm/                  接口 + 豆包实现
 │   │   ├── tts/                  接口 + Minimax 实现
@@ -182,7 +192,8 @@ aibao-server/
 │       ├── config/
 │       ├── errors/
 │       ├── traceid/
-│       └── safehash/             敏感字段脱敏
+│       ├── safehash/             敏感字段脱敏
+│       └── cost/                 [Plan 11B 新增] 成本计算（tokens/chars → 元，从 config 单价表）
 ├── config/
 │   ├── config.dev.yaml
 │   └── config.yaml.example       入 git；真实配置不入 git
@@ -235,12 +246,33 @@ type Client interface {
 
 ## 4. 核心数据流：一次"生成故事"的完整链路
 
+### 4.0 Plan 11A 起的两阶段流（大纲预览 → 正文生成）
+
+> 详见 [Plan 11A spec](2026-05-25-plan-11a-ai-outline-preview.md)。本节是顶层概览。
+
+```
+阶段 1（同步，~2s）：POST /api/v1/outlines/preview
+  Body: { child_id, prompt, duration_min }
+  → service/outline/Preview
+    → PreCheck（复用）
+    → gateway/llm（doubao-lite, response_format=json, purpose=outline）
+    → Redis SET outline:{id} TTL=5min
+  ← 200 { outline_id, outline:{title,synopsis,themes,style,...}, expires_at }
+
+阶段 2（异步音频管线，~10-20s 文本 + 后台 TTS）：POST /api/v1/stories/generate
+  Body: { child_id, outline_id, outline_overrides? }   ← Plan 11A 新契约
+  → 走下面 4.1 完整链路（Step 0 HydrateFromOutline 后接旧链路 Step a..i 不变）
+```
+
+兼容期内 `/stories/generate` 同时接受旧字段（duration_min/style/topic/prompt）走旧路径，不带 outline_id 时 fallback 旧流水线。详见 11A spec §6.4 弃用计划。
+
 ### 4.1 链路概览（含双层安全 + 音频编排 + Outbox）
 
 ```
-1. Flutter App: 用户点"生成故事"
+1. Flutter App: 用户点"开始生成"（拿到 outline_id 后；或兼容期旧客户端直传字段）
    POST /api/v1/stories/generate
-   Body: { childId, prompt, duration: 10, style: "冒险", topic: "勇敢" }
+   Body (新):  { child_id, outline_id, outline_overrides?:{style?,themes?} }
+   Body (旧, 兼容): { childId, prompt, duration: 5, style: "冒险", topic: "勇敢" }
 
 2. Nginx → 终结 TLS → 转发到 :8080
 
@@ -257,6 +289,11 @@ type Client interface {
    - 调 service.story.Orchestrator.Generate(ctx, params)
 
 5. service.story.Orchestrator 编排：
+   ★ 0. HydrateFromOutline（Plan 11A 新增）：
+        - 若请求带 outline_id：Redis GET 拿 outline，apply outline_overrides
+        - 把 outline.style / themes / scene_seed / synopsis 注入 BuildInput
+        - 若 outline_id 过期：返 400 让用户重新预览
+        - 若无 outline_id：走旧字段直组装（兼容期）
    a. repository 查 child 档案（含害怕清单）
    b. repository 查 active_storyline + 最近 N 条 memory（彩蛋串联）
 
@@ -836,8 +873,20 @@ story.generate.done           total_ms
 | `outbox_pending_count` | Gauge | - | 队列堆积（每 30s 采样） |
 | `outbox_dead_total` | Counter | event_type | 死信累计 |
 | `external_api_error_total` | Counter | provider | 外部错误 |
-| `llm_budget_used_yuan` | Gauge | - | 每日预算消耗 |
+| `llm_budget_used_yuan` | Gauge | - | 每日预算消耗（Plan 11B 起从 cost_yuan_total 派生）|
 | `http_request_duration_seconds` | Histogram | path, status | 通用 HTTP |
+| **Plan 11A 大纲** ||||
+| `outline_preview_total` | Counter | status | 大纲预览次数 |
+| `outline_preview_duration_seconds` | Histogram | - | 大纲生成耗时 |
+| `outline_confirmed_total` | Counter | - | 用户确认大纲次数 |
+| `outline_refreshed_total` | Counter | - | "换个角度"次数 |
+| `outline_expired_total` | Counter | - | 5min 未确认过期 |
+| **Plan 11B 成本** ||||
+| `cost_yuan_total` | Counter | provider, model, purpose, outcome | 累计成本（元）|
+| `cost_yuan_per_user_total` | Counter | user_id_hash | 单用户累计 |
+| `cost_event_record_failed_total` | Counter | reason | 记账失败 |
+| `cost_flusher_batch_size` | Histogram | - | 每次 flush 批量 |
+| `cost_flusher_lag_seconds` | Gauge | - | 队列中最老事件年龄 |
 
 > 🎓 **指标 vs 日志**
 > 日志是"发生了什么"（叙事，单条精确），指标是"统计是多少"（聚合数字，趋势）。SLO（如 P95、错误率）必须靠指标算，日志做不到聚合。
@@ -1060,13 +1109,16 @@ safety:
 - 短信：~2000 条/月
 
 > 具体单价以 Provider 实时为准。**重点是订阅定价必须 ≥ 单用户成本**。
+> **Plan 11B 起** `pkg/cost` 从 `config.yaml` 单价表读取实时单价，按 tokens/chars 实际计算入库 `cost_events` 表，不再依赖此处估算。
 
 ### 14.2 控制手段（写入代码）
 - 每用户每分钟 5 次限流
-- 免费用户每日 5 次额度
-- 每日 LLM token 总额度熔断（`budget:llm:daily`）
+- 免费用户每日 5 次额度（**MVP 阶段商业化推迟，Plan 11B 数据成熟后再启用**）
+- 每日 LLM token 总额度熔断（`budget:llm:daily`，Plan 11B 后从实际成本派生）
 - 30 秒重复请求去重（`dedup:gen:`）
 - 90 天未访问的故事音频从 COS 清理（保留文本与 object_key 占位）
+- **大纲预览-确认模式**（Plan 11A）：被拒大纲只烧小钱（doubao-lite ~¥0.005），节省整篇故事成本（doubao-pro ~¥0.42）
+- **成本可观测**（Plan 11B）：`cost_events` 历史表 + `cost-report` CLI，为后期定价决策提供数据基础
 
 ---
 
