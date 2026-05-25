@@ -95,3 +95,37 @@ audio:
   mix_timeout_seconds: 30
   output_sample_rate: 32000
   output_bitrate_kbps: 128
+
+cost:
+  price_book_version: v20260525-1
+  pricing_source: |
+    # Minimax: 官方文档 https://platform.minimaxi.com/document/Price 2026-05-25 拉取
+    # 豆包: 当前为社区公示估值（pro=4/8、lite=0.3/0.6 元/百万tokens）— TODO Task 1 上线前补火山引擎控制台实价
+    # COS: 当前为社区公示估值 — TODO Task 1 上线前补腾讯云 buy.cloud.tencent.com/price/cos ap-hongkong 标准存储实价
+  entries:
+    # ============== 豆包（火山引擎）社区公示估值 — TODO 待校对 ==============
+    - provider: doubao
+      model: doubao-1.5-pro-32k
+      billing_mode: standard
+      unit: yuan_per_1m_tokens
+      input: 4.00   # TODO 待校对
+      output: 8.00  # TODO 待校对
+    - provider: doubao
+      model: doubao-1.5-lite-32k
+      billing_mode: standard
+      unit: yuan_per_1m_tokens
+      input: 0.30   # TODO 待校对
+      output: 0.60  # TODO 待校对
+    # ============== Minimax TTS — 官网公示价（HD 系列套餐一换算）==============
+    - provider: minimax
+      model: t2a-v2
+      billing_mode: standard
+      unit: yuan_per_1k_chars
+      chars: 0.315   # HD 系列 ¥630/2M 字符 = ¥0.315/千字符
+    # （如未来切到 Turbo 系列，单独加一条 billing_mode: turbo / chars: 0.18）
+    # ============== 腾讯云 COS ap-hongkong 标准存储 — TODO 待校对 ==============
+    - provider: tencent_cos
+      model: hk-standard
+      billing_mode: standard
+      put_yuan_per_10k_requests: 0.10   # TODO 待校对
+      bandwidth_yuan_per_gb: 0.50       # TODO 待校对
