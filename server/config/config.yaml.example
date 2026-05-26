@@ -96,6 +96,11 @@ audio:
   output_sample_rate: 32000
   output_bitrate_kbps: 128
 
+idhash:
+  # Plan 11B: 用于 cost_events.child_id_hash HMAC（域分离防跨表关联）。
+  # 生产环境必须用 AIBAO_IDHASH_SECRET 覆盖。
+  secret: aibao-dev-id-hash-secret-change-me
+
 cost:
   price_book_version: v20260525-1
   pricing_source: |

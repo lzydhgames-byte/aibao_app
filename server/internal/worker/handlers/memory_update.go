@@ -5,16 +5,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/aibao/server/internal/model"
+	"github.com/aibao/server/internal/pkg/traceid"
 	"github.com/aibao/server/internal/repository"
 )
 
 // Summarizer is the minimal interface MemoryUpdateHandler needs from
 // service/memory.Summarizer. Kept as an interface so tests can stub it
 // without spinning up an LLM client.
+//
+// SummarizeForStory is the Plan 11B cost-aware variant. Implementations that
+// don't care about cost should forward to Summarize and ignore the IDs.
 type Summarizer interface {
 	Summarize(ctx context.Context, storyText string) string
+	SummarizeForStory(ctx context.Context, storyText string, childID, storyID int64, userID *int64, traceHex string) string
 }
 
 // MemoryUpdateHandler writes a memory record summarizing the just-finished
@@ -91,7 +97,16 @@ func (h *MemoryUpdateHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	if err != nil || story == nil {
 		return nil
 	}
-	summary := h.summarizer.Summarize(ctx, story.TextContent)
+	trHex := "00000000"
+	if id, ok := traceid.FromContext(ctx); ok && id != "" {
+		if strings.HasPrefix(id, "tr-") {
+			id = id[3:]
+		}
+		if len(id) >= 8 {
+			trHex = id
+		}
+	}
+	summary := h.summarizer.SummarizeForStory(ctx, story.TextContent, p.ChildID, storyID, nil, trHex)
 	if summary == "" {
 		return nil
 	}

@@ -335,6 +335,10 @@ func (f *fakeChapterHook) Extract(_ context.Context, _ string) string {
 	f.calls++
 	return f.out
 }
+func (f *fakeChapterHook) ExtractForStory(_ context.Context, _ string, _ int64, _ int64, _ *int64, _ string) string {
+	f.calls++
+	return f.out
+}
 
 func newOrchPlan8(t *testing.T, mock llm.Client, slRepo StorylineRepo, ctxBld StorylineContextBuilderAPI, hook ChapterHookAPI) (*Orchestrator, *fakeStoryRepo) {
 	t.Helper()

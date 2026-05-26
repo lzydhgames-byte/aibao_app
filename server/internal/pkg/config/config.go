@@ -24,6 +24,12 @@ type Config struct {
 	TTS      TTSConfig      `mapstructure:"tts"`
 	Storage  StorageConfig  `mapstructure:"storage"`
 	Audio    AudioConfig    `mapstructure:"audio"`
+	IDHash   IDHashConfig   `mapstructure:"idhash"`
+}
+
+// IDHashConfig holds the HMAC secret for cost_events.child_id_hash (Plan 11B).
+type IDHashConfig struct {
+	Secret string `mapstructure:"secret"` // env AIBAO_IDHASH_SECRET
 }
 
 // AudioConfig holds ffmpeg + BGM mixing parameters.
@@ -138,9 +144,15 @@ type RedisConfig struct {
 	DB       int    `mapstructure:"db"`
 }
 
-// Load reads config from file and overlays env vars (prefix envPrefix + "_").
-// Env naming: AIBAO_SERVER_PORT, AIBAO_POSTGRES_PASSWORD, etc.
+// Load reads config from file and overlays env vars. See LoadWithViper.
 func Load(path string) (*Config, error) {
+	cfg, _, err := LoadWithViper(path)
+	return cfg, err
+}
+
+// LoadWithViper is like Load but also returns the underlying *viper.Viper
+// so callers (e.g. Plan 11B PriceBook) can read additional sub-trees.
+func LoadWithViper(path string) (*Config, *viper.Viper, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
 	v.SetEnvPrefix(envPrefix)
@@ -153,7 +165,7 @@ func Load(path string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	if err := v.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("read config %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	// Explicitly bind env vars for fields not present in the config file,
@@ -181,18 +193,19 @@ func Load(path string) (*Config, error) {
 		"storage.presigned_ttl_seconds", "storage.upload_timeout_seconds",
 		"audio.ffmpeg_path", "audio.bgm_cache_dir", "audio.bgm_volume_db",
 		"audio.mix_timeout_seconds", "audio.output_sample_rate", "audio.output_bitrate_kbps",
+		"idhash.secret",
 	} {
 		_ = v.BindEnv(key)
 	}
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal config: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 	if err := applyDefaultsAndValidate(&cfg, path); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &cfg, nil
+	return &cfg, v, nil
 }
 
 func applyDefaultsAndValidate(c *Config, path string) error {
@@ -360,6 +373,11 @@ func applyDefaultsAndValidate(c *Config, path string) error {
 	}
 	if c.Audio.OutputBitrateKbps == 0 {
 		c.Audio.OutputBitrateKbps = 128
+	}
+	if c.IDHash.Secret == "" {
+		// Plan 11B: dev fallback so cost recording works out-of-the-box;
+		// production MUST override via AIBAO_IDHASH_SECRET.
+		c.IDHash.Secret = "aibao-dev-id-hash-secret-change-me"
 	}
 	return nil
 }

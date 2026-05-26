@@ -43,6 +43,9 @@ func (f *fakeStoryRepo) UpdateAudio(_ context.Context, _ int64, _ string, _ int)
 type fakeSummarizer struct{ out string }
 
 func (f *fakeSummarizer) Summarize(_ context.Context, _ string) string { return f.out }
+func (f *fakeSummarizer) SummarizeForStory(_ context.Context, _ string, _ int64, _ int64, _ *int64, _ string) string {
+	return f.out
+}
 
 func TestMemoryUpdate_HandleHappy(t *testing.T) {
 	mem := &fakeMem{}

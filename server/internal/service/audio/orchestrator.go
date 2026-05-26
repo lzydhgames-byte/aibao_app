@@ -38,6 +38,13 @@ type ComposeResponse struct {
 	Mood             string
 	BGMFilename      string
 	ParseResult      ParseResult
+	// Plan 11B: TTS gateway metadata surfaced for cost recording in the
+	// caller (worker handler). Provider/Model identify the priced row;
+	// CharCount is the billing basis; Latency is round-trip elapsed.
+	TTSProvider  string
+	TTSModel     string
+	TTSCharCount int
+	TTSLatencyMs int
 }
 
 // Orchestrator wires parser → tts → bgm pick → cache → mixer.
@@ -94,6 +101,10 @@ func (o *Orchestrator) Compose(ctx context.Context, req ComposeRequest) (*Compos
 		HasBGM:           false,
 		Mood:             pr.BGMMood,
 		ParseResult:      pr,
+		TTSProvider:      ttsResp.Provider,
+		TTSModel:         voiceReq.Model,
+		TTSCharCount:     ttsResp.CharCount,
+		TTSLatencyMs:     int(ttsResp.Latency.Milliseconds()),
 	}
 
 	// 3. Pick BGM by mood.

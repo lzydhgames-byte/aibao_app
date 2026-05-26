@@ -11,9 +11,13 @@ import (
 	"github.com/aibao/server/internal/gateway/llm"
 	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/model"
+	pkgcost "github.com/aibao/server/internal/pkg/cost"
 	apperr "github.com/aibao/server/internal/pkg/errors"
+	"github.com/aibao/server/internal/pkg/idhash"
 	"github.com/aibao/server/internal/pkg/logger"
+	"github.com/aibao/server/internal/pkg/traceid"
 	"github.com/aibao/server/internal/repository"
+	costsvc "github.com/aibao/server/internal/service/cost"
 	"github.com/aibao/server/internal/service/safety"
 	"github.com/aibao/server/internal/service/story/prompt"
 )
@@ -57,6 +61,7 @@ type StorylineContextBuilderAPI interface {
 // ChapterHookAPI is the slice of ChapterHookExtractor used by the orchestrator.
 type ChapterHookAPI interface {
 	Extract(ctx context.Context, storyText string) string
+	ExtractForStory(ctx context.Context, storyText string, childID, storyID int64, userID *int64, traceHex string) string
 }
 
 // Deps groups Orchestrator dependencies.
@@ -72,6 +77,8 @@ type Deps struct {
 	StorylineCtxBld StorylineContextBuilderAPI // Plan 8 (optional)
 	ChapterHook     ChapterHookAPI // Plan 8 (optional)
 	Biz             *metrics.Business // Plan 8 metrics (nil-safe)
+	Recorder        *costsvc.Recorder // Plan 11B cost recording (nil-safe)
+	IDHasher        *idhash.Hasher    // Plan 11B child_id_hash HMAC (nil-safe)
 	PromptTmpl      string
 	FallbackDir     string
 	StoryModel      string
@@ -216,12 +223,37 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 	var llmText string
 	var llmInTok, llmOutTok int
 	llmFailed := false
+	trHex := traceHex(ctx)
+	uid := p.UserID
+	userIDPtr := &uid
+	childHash := ""
+	if o.d.IDHasher != nil {
+		childHash = o.d.IDHasher.Hash("child", child.ID)
+	}
 	for attempt := 0; attempt <= 1; attempt++ {
 		resp, err := o.d.LLM.Generate(ctx, llm.GenerateRequest{
 			Model:       o.d.StoryModel,
 			Messages:    []llm.Message{{Role: "system", Content: po.SystemPrompt}, {Role: "user", Content: po.UserPrompt}},
 			Temperature: o.d.Temperature,
 		})
+		outcome := "ok"
+		if err != nil {
+			outcome = "fail"
+		}
+		if o.d.Recorder != nil && resp != nil {
+			_ = o.d.Recorder.Record(ctx, costsvc.RecordInput{
+				EventID:     fmt.Sprintf("%s:story:llm_call:%d", trHex, attempt+1),
+				UserID:      userIDPtr,
+				ChildIDHash: childHash,
+				Purpose:     "story",
+				Provider:    resp.Provider,
+				Model:       resp.Model,
+				Usage:       pkgcost.Usage{TokensIn: resp.InputTokens, TokensOut: resp.OutputTokens},
+				Outcome:     outcome,
+				DurationMs:  int(resp.Latency.Milliseconds()),
+				TraceID:     trHex,
+			})
+		}
 		if err == nil {
 			llmText = resp.Text
 			llmInTok = resp.InputTokens
@@ -259,6 +291,24 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 				Messages:    []llm.Message{{Role: "system", Content: po.SystemPrompt}, {Role: "user", Content: retryUser}},
 				Temperature: o.d.Temperature,
 			})
+			if o.d.Recorder != nil && resp != nil {
+				outcome := "ok"
+				if err != nil {
+					outcome = "fail"
+				}
+				_ = o.d.Recorder.Record(ctx, costsvc.RecordInput{
+					EventID:     fmt.Sprintf("%s:story:length_retry:%d", trHex, retryNo),
+					UserID:      userIDPtr,
+					ChildIDHash: childHash,
+					Purpose:     "story",
+					Provider:    resp.Provider,
+					Model:       resp.Model,
+					Usage:       pkgcost.Usage{TokensIn: resp.InputTokens, TokensOut: resp.OutputTokens},
+					Outcome:     outcome,
+					DurationMs:  int(resp.Latency.Milliseconds()),
+					TraceID:     trHex,
+				})
+			}
 			if err != nil {
 				lg.Warn("story.length.retry_failed", "attempt", retryNo, "err", err.Error())
 				break
@@ -410,7 +460,7 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 	if !usedFallback && storylineID != nil && o.d.Storylines != nil {
 		hint := ""
 		if o.d.ChapterHook != nil {
-			hint = o.d.ChapterHook.Extract(ctx, llmText)
+			hint = o.d.ChapterHook.ExtractForStory(ctx, llmText, child.ID, story.ID, userIDPtr, trHex)
 		}
 		if err := o.d.Storylines.IncrementEpisode(ctx, *storylineID, hint); err != nil {
 			lg.Warn("story.storyline.increment_failed", "err", err.Error())
@@ -503,6 +553,23 @@ func extractTitle(text string) string {
 		return string(runes)
 	}
 	return ""
+}
+
+// traceHex returns the 8+hex portion of a project trace id ("tr-abcd1234" → "abcd1234")
+// suitable for the Recorder event_id regex (^[a-f0-9]{8,}:...). Falls back to a
+// stable zero-prefix when missing — recording continues with a degraded id.
+func traceHex(ctx context.Context) string {
+	id, ok := traceid.FromContext(ctx)
+	if !ok || id == "" {
+		return "00000000"
+	}
+	if strings.HasPrefix(id, "tr-") {
+		id = id[3:]
+	}
+	if len(id) < 8 {
+		id = id + strings.Repeat("0", 8-len(id))
+	}
+	return id
 }
 
 func summarize(text string, maxRunes int) string {

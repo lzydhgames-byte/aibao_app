@@ -28,6 +28,8 @@ import (
 	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/model"
 	"github.com/aibao/server/internal/pkg/config"
+	pkgcost "github.com/aibao/server/internal/pkg/cost"
+	"github.com/aibao/server/internal/pkg/idhash"
 	"github.com/aibao/server/internal/pkg/jwtauth"
 	"github.com/aibao/server/internal/pkg/logger"
 	"github.com/aibao/server/internal/pkg/phonecrypt"
@@ -37,6 +39,7 @@ import (
 	"github.com/aibao/server/internal/service/bootstrap"
 	childsvc "github.com/aibao/server/internal/service/child"
 	"github.com/aibao/server/internal/service/audio"
+	costsvc "github.com/aibao/server/internal/service/cost"
 	memorysvc "github.com/aibao/server/internal/service/memory"
 	"github.com/aibao/server/internal/service/safety"
 	storysvc "github.com/aibao/server/internal/service/story"
@@ -85,7 +88,7 @@ func run() error {
 		}
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, vp, err := config.LoadWithViper(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -187,6 +190,20 @@ func run() error {
 	m := metrics.New(reg)
 	bm := metrics.NewBusiness(reg)
 
+	// Plan 11B Thin Slice — wire cost recording (Recorder + Flusher + IDHasher).
+	// PriceBook is loaded from the same viper instance (cost.entries sub-tree).
+	pb, err := pkgcost.LoadFromViper(vp)
+	if err != nil {
+		return fmt.Errorf("pricebook: %w", err)
+	}
+	idHasher := idhash.New(cfg.IDHash.Secret)
+	costRecorder := costsvc.NewRecorder(pb, bm)
+	costFlusher := costsvc.NewFlusher(costRecorder, db, bm)
+	costCtx, costCancel := context.WithCancel(context.Background())
+	defer costCancel()
+	go costFlusher.Run(costCtx)
+	lg.Info("cost.recorder.wired", "price_version", pb.Version())
+
 	// TTS client (Plan 5)
 	var ttsClient tts.Client
 	switch cfg.TTS.Provider {
@@ -266,13 +283,13 @@ func run() error {
 	postChecker := safety.NewPostChecker(rs)
 
 	// Plan 6: memory summarizer (post-story LLM) + selector (pre-story injection).
-	memorySummarizer := memorysvc.NewSummarizer(llmClient, cfg.LLM.IntentModel, 0.3, bm, lg)
+	memorySummarizer := memorysvc.NewSummarizer(llmClient, cfg.LLM.IntentModel, 0.3, bm, lg).WithCost(costRecorder, idHasher)
 	memorySelector := memorysvc.NewSelector(memoryRepo, 3, lg)
 	bootstrapSvc := bootstrap.NewService(childService, llmClient, cfg.LLM.IntentModel, 0.5, bm, lg)
 	bootstrapHandler := api.NewBootstrapHandler(bootstrapSvc)
 
 	// Plan 8: storyline context builder + chapter-hook extractor for sequels.
-	chapterHook := storysvc.NewChapterHookExtractor(llmClient, cfg.LLM.IntentModel, 0.4, bm, lg)
+	chapterHook := storysvc.NewChapterHookExtractor(llmClient, cfg.LLM.IntentModel, 0.4, bm, lg).WithCost(costRecorder, idHasher)
 	storylineCtxBld := storysvc.NewStorylineContextBuilder(storylineRepo, storyRepo, memoryRepo, lg)
 
 	orch, err := storysvc.NewOrchestrator(storysvc.Deps{
@@ -287,6 +304,8 @@ func run() error {
 		StorylineCtxBld: storylineCtxBld,
 		ChapterHook:     chapterHook,
 		Biz:             bm,
+		Recorder:        costRecorder,
+		IDHasher:        idHasher,
 		PromptTmpl:      "safety/system_prompt.tmpl",
 		FallbackDir:     "safety/fallback_stories",
 		StoryModel:      cfg.LLM.StoryModel,
@@ -354,7 +373,7 @@ func run() error {
 		)
 		audioOrch := audio.NewOrchestrator(ttsClient, bgmRepo, bgmCache, ffmpegMixer, bm)
 
-		w.Register(model.EventTypeTTSSynthesis, handlers.NewTTSSynthesisHandler(
+		ttsHandler := handlers.NewTTSSynthesisHandler(
 			storyRepo, storyRepo,
 			audioOrch, storageClient,
 			handlers.TTSHandlerConfig{
@@ -367,7 +386,8 @@ func run() error {
 				Speed:      cfg.TTS.Speed,
 			},
 			bm,
-		))
+		).WithCost(costRecorder, idHasher, "tencent_cos", "hk-standard")
+		w.Register(model.EventTypeTTSSynthesis, ttsHandler)
 		go w.Run(workerCtx)
 		lg.Info("worker.enabled", "poll_sec", cfg.Worker.PollIntervalSec)
 	}

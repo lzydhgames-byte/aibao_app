@@ -86,3 +86,44 @@ audio:
   mix_timeout_seconds: 30
   output_sample_rate: 32000
   output_bitrate_kbps: 128
+
+idhash:
+  # Plan 11B: HMAC secret for cost_events.child_id_hash. Override via AIBAO_IDHASH_SECRET in prod.
+  secret: aibao-dev-id-hash-secret-change-me
+
+cost:
+  price_book_version: v20260525-1
+  entries:
+    - provider: doubao
+      model: doubao-1.5-pro-32k
+      billing_mode: standard
+      unit: yuan_per_1m_tokens
+      input: 4.00
+      output: 8.00
+    - provider: doubao
+      model: doubao-1.5-lite-32k
+      billing_mode: standard
+      unit: yuan_per_1m_tokens
+      input: 0.30
+      output: 0.60
+    - provider: doubao
+      model: doubao-lite
+      billing_mode: standard
+      unit: yuan_per_1m_tokens
+      input: 0.30
+      output: 0.60
+    - provider: minimax
+      model: t2a-v2
+      billing_mode: standard
+      unit: yuan_per_1k_chars
+      chars: 0.315
+    - provider: minimax
+      model: speech-01-turbo
+      billing_mode: standard
+      unit: yuan_per_1k_chars
+      chars: 0.315
+    - provider: tencent_cos
+      model: hk-standard
+      billing_mode: standard
+      put_yuan_per_10k_requests: 0.10
+      bandwidth_yuan_per_gb: 0.50

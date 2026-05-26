@@ -7,14 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aibao/server/internal/gateway/storage"
 	"github.com/aibao/server/internal/gateway/tts"
 	"github.com/aibao/server/internal/metrics"
 	"github.com/aibao/server/internal/model"
+	pkgcost "github.com/aibao/server/internal/pkg/cost"
+	"github.com/aibao/server/internal/pkg/idhash"
 	"github.com/aibao/server/internal/pkg/logger"
+	"github.com/aibao/server/internal/pkg/traceid"
 	"github.com/aibao/server/internal/service/audio"
+	costsvc "github.com/aibao/server/internal/service/cost"
 )
 
 // StoryReader is the minimal read surface this handler needs.
@@ -46,12 +51,16 @@ type Composer interface {
 
 // TTSSynthesisHandler composes story audio (TTS + BGM) and uploads to storage.
 type TTSSynthesisHandler struct {
-	stories  StoryReader
-	repo     StoryAudioWriter
-	composer Composer
-	storage  storage.Client
-	cfg      TTSHandlerConfig
-	bm       *metrics.Business
+	stories         StoryReader
+	repo            StoryAudioWriter
+	composer        Composer
+	storage         storage.Client
+	cfg             TTSHandlerConfig
+	bm              *metrics.Business
+	recorder        *costsvc.Recorder // Plan 11B (nil-safe)
+	hasher          *idhash.Hasher    // Plan 11B (nil-safe)
+	storageProvider string            // Plan 11B pricebook key, e.g. "tencent_cos"
+	storageModel    string            // Plan 11B pricebook key, e.g. "hk-standard"
 }
 
 // NewTTSSynthesisHandler constructs the handler.
@@ -61,6 +70,17 @@ func NewTTSSynthesisHandler(
 	cfg TTSHandlerConfig, bm *metrics.Business,
 ) *TTSSynthesisHandler {
 	return &TTSSynthesisHandler{stories: stories, repo: repo, composer: composer, storage: s, cfg: cfg, bm: bm}
+}
+
+// WithCost wires Plan 11B cost recording. storageProvider/storageModel are
+// the PriceBook lookup keys for the storage_put events (e.g. "tencent_cos",
+// "hk-standard").
+func (h *TTSSynthesisHandler) WithCost(r *costsvc.Recorder, hasher *idhash.Hasher, storageProvider, storageModel string) *TTSSynthesisHandler {
+	h.recorder = r
+	h.hasher = hasher
+	h.storageProvider = storageProvider
+	h.storageModel = storageModel
+	return h
 }
 
 type ttsSynthesisPayload struct {
@@ -95,6 +115,22 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 		return nil
 	}
 
+	// Plan 11B: derive trace + identity hashes for cost recording.
+	trHex := "00000000"
+	if id, ok := traceid.FromContext(ctx); ok && id != "" {
+		if strings.HasPrefix(id, "tr-") {
+			id = id[3:]
+		}
+		if len(id) >= 8 {
+			trHex = id
+		}
+	}
+	childHash := ""
+	if h.hasher != nil {
+		childHash = h.hasher.Hash("child", story.ChildID)
+	}
+	sidPtr := func(v int64) *int64 { x := v; return &x }(storyID)
+
 	composed, err := h.composer.Compose(ctx, audio.ComposeRequest{
 		StoryID:     story.ID,
 		ChildID:     story.ChildID,
@@ -112,6 +148,18 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 			h.bm.TTSCallTotal.WithLabelValues(h.cfg.Provider, "fail").Inc()
 			h.bm.AudioFailedTotal.WithLabelValues("tts").Inc()
 		}
+		if h.recorder != nil {
+			_ = h.recorder.Record(ctx, costsvc.RecordInput{
+				EventID:     fmt.Sprintf("%s:tts:synthesize:1", trHex),
+				ChildIDHash: childHash,
+				Purpose:     "tts",
+				Provider:    h.cfg.Provider,
+				Model:       h.cfg.Model,
+				Outcome:     "fail",
+				StoryID:     sidPtr,
+				TraceID:     trHex,
+			})
+		}
 		if mErr := h.repo.MarkAudioFailed(ctx, storyID, err.Error()); mErr != nil {
 			lg.Error("tts.mark_failed_persist_err", "err", mErr.Error())
 		}
@@ -120,18 +168,51 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 	if h.bm != nil {
 		h.bm.TTSCallTotal.WithLabelValues(h.cfg.Provider, "ok").Inc()
 	}
+	if h.recorder != nil {
+		_ = h.recorder.Record(ctx, costsvc.RecordInput{
+			EventID:     fmt.Sprintf("%s:tts:synthesize:1", trHex),
+			ChildIDHash: childHash,
+			Purpose:     "tts",
+			Provider:    composed.TTSProvider,
+			Model:       composed.TTSModel,
+			Usage:       pkgcost.Usage{Chars: composed.TTSCharCount, AudioSeconds: float64(composed.AudioDurationSec)},
+			Outcome:     "ok",
+			DurationMs:  composed.TTSLatencyMs,
+			StoryID:     sidPtr,
+			TraceID:     trHex,
+		})
+	}
 	lg.Info("audio.compose.ok", "story_id", storyID,
 		"bytes", len(composed.AudioBytes), "dur_sec", composed.AudioDurationSec,
 		"has_bgm", composed.HasBGM, "mood", composed.Mood)
 
 	key := buildObjectKey(story.ChildID, story.ID, h.cfg.Format)
 	uStart := time.Now()
-	_, err = h.storage.Upload(ctx, storage.UploadInput{
+	bytesUp, err := h.storage.Upload(ctx, storage.UploadInput{
 		Key: key, Body: bytes.NewReader(composed.AudioBytes), Size: int64(len(composed.AudioBytes)),
 		ContentType: contentTypeFor(h.cfg.Format),
 	})
+	uploadElapsed := time.Since(uStart)
 	if h.bm != nil {
-		h.bm.StorageUploadDuration.WithLabelValues("cos").Observe(time.Since(uStart).Seconds())
+		h.bm.StorageUploadDuration.WithLabelValues("cos").Observe(uploadElapsed.Seconds())
+	}
+	if h.recorder != nil {
+		outcome := "ok"
+		if err != nil {
+			outcome = "fail"
+		}
+		_ = h.recorder.Record(ctx, costsvc.RecordInput{
+			EventID:     fmt.Sprintf("%s:storage_put:upload:1", trHex),
+			ChildIDHash: childHash,
+			Purpose:     "storage_put",
+			Provider:    h.storageProvider,
+			Model:       h.storageModel,
+			Usage:       pkgcost.Usage{Bytes: bytesUp},
+			Outcome:     outcome,
+			DurationMs:  int(uploadElapsed.Milliseconds()),
+			StoryID:     sidPtr,
+			TraceID:     trHex,
+		})
 	}
 	if err != nil {
 		if h.bm != nil {
