@@ -72,9 +72,10 @@ func TestAudioURL_Pending(t *testing.T) {
 
 func TestAudioURL_Ready(t *testing.T) {
 	st := storage.NewMock()
-	require.NoError(t, st.Upload(context.Background(), storage.UploadInput{
+	_, upErr := st.Upload(context.Background(), storage.UploadInput{
 		Key: "audio/7/1-x.mp3", Body: strings.NewReader("xxx"), Size: 3,
-	}))
+	})
+	require.NoError(t, upErr)
 	h := NewAudioHandler(
 		&stubStoryReader{s: &model.Story{
 			ID: 1, ChildID: 7, AudioStatus: model.AudioStatusReady, AudioObjectKey: "audio/7/1-x.mp3",

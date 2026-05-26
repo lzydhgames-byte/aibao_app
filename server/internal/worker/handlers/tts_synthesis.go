@@ -126,7 +126,7 @@ func (h *TTSSynthesisHandler) Handle(ctx context.Context, e *model.OutboxEvent) 
 
 	key := buildObjectKey(story.ChildID, story.ID, h.cfg.Format)
 	uStart := time.Now()
-	err = h.storage.Upload(ctx, storage.UploadInput{
+	_, err = h.storage.Upload(ctx, storage.UploadInput{
 		Key: key, Body: bytes.NewReader(composed.AudioBytes), Size: int64(len(composed.AudioBytes)),
 		ContentType: contentTypeFor(h.cfg.Format),
 	})

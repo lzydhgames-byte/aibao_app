@@ -30,6 +30,7 @@ type SynthesizeResponse struct {
 	Audio           []byte
 	Format          string
 	DurationSeconds int
+	CharCount       int           // Plan 11B: chars billed by TTS provider; business reads into pkgcost.Usage.Chars
 	Provider        string
 	Latency         time.Duration
 }

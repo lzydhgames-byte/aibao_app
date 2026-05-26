@@ -129,13 +129,13 @@ func signV5(secretID, secretKey, method, uri string, expireSec int64) string {
 // Upload PUTs the object body via direct net/http (bypassing cos-go-sdk-v5).
 // SDK path was hanging at TLS handshake from 香港 to ap-shanghai despite a
 // custom transport; bare PUT with manual V5 signature completes in ~300ms.
-func (s *COSClient) Upload(ctx context.Context, in UploadInput) error {
+func (s *COSClient) Upload(ctx context.Context, in UploadInput) (int64, error) {
 	uri := "/" + strings.TrimPrefix(in.Key, "/")
 	urlStr := "https://" + s.bucketHost + uri
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, urlStr, in.Body)
 	if err != nil {
-		return fmt.Errorf("%w: build request: %v", ErrUpstream, err)
+		return 0, fmt.Errorf("%w: build request: %v", ErrUpstream, err)
 	}
 	if in.ContentType != "" {
 		req.Header.Set("Content-Type", in.ContentType)
@@ -147,14 +147,14 @@ func (s *COSClient) Upload(ctx context.Context, in UploadInput) error {
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUpstream, err)
+		return 0, fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("%w: HTTP %d: %s", ErrUpstream, resp.StatusCode, strings.TrimSpace(string(body)))
+		return 0, fmt.Errorf("%w: HTTP %d: %s", ErrUpstream, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return nil
+	return in.Size, nil
 }
 
 // HeadObject inspects object metadata.

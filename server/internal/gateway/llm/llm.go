@@ -29,7 +29,7 @@ type GenerateRequest struct {
 // GenerateResponse is the structured output.
 type GenerateResponse struct {
 	Text         string
-	InputTokens  int
+	InputTokens  int           // Plan 11B Usage data: business pulls these into pkgcost.Usage and calls service/cost/Recorder.Record themselves
 	OutputTokens int
 	Provider     string
 	Model        string

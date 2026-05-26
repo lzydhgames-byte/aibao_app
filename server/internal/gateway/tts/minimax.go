@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"unicode/utf8"
 )
 
 // MinimaxConfig holds settings for the Minimax client.
@@ -151,6 +152,7 @@ func (m *MinimaxClient) Synthesize(ctx context.Context, req SynthesizeRequest) (
 		Audio:           audioBytes,
 		Format:          req.Format,
 		DurationSeconds: durSec,
+		CharCount:       utf8.RuneCountInString(req.Text),
 		Provider:        "minimax",
 		Latency:         latency,
 	}, nil

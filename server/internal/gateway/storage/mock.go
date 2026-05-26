@@ -25,19 +25,19 @@ func NewMock() *MockClient {
 func (m *MockClient) FailNext() { m.failNext = true }
 
 // Upload stores body bytes under key.
-func (m *MockClient) Upload(_ context.Context, in UploadInput) error {
+func (m *MockClient) Upload(_ context.Context, in UploadInput) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failNext {
 		m.failNext = false
-		return ErrUpstream
+		return 0, ErrUpstream
 	}
 	b, err := io.ReadAll(in.Body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	m.objects[in.Key] = b
-	return nil
+	return int64(len(b)), nil
 }
 
 // HeadObject returns size + content-type or ErrNotFound.

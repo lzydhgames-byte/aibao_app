@@ -13,9 +13,11 @@ import (
 func TestMockStorage_RoundTrip(t *testing.T) {
 	var _ Client = NewMock()
 	m := NewMock()
-	require.NoError(t, m.Upload(context.Background(), UploadInput{
+	n, err := m.Upload(context.Background(), UploadInput{
 		Key: "a.mp3", Body: bytes.NewReader([]byte("hello")), Size: 5, ContentType: "audio/mpeg",
-	}))
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(5), n)
 	meta, err := m.HeadObject(context.Background(), "a.mp3")
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), meta.Size)
@@ -33,7 +35,7 @@ func TestMockStorage_RoundTrip(t *testing.T) {
 func TestMockStorage_FailNext(t *testing.T) {
 	m := NewMock()
 	m.FailNext()
-	err := m.Upload(context.Background(), UploadInput{Key: "x", Body: bytes.NewReader([]byte("y"))})
+	_, err := m.Upload(context.Background(), UploadInput{Key: "x", Body: bytes.NewReader([]byte("y"))})
 	assert.ErrorIs(t, err, ErrUpstream)
 }
 

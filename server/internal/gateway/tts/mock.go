@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 )
 
 // MockClient is a deterministic in-memory TTS for tests.
@@ -39,6 +40,7 @@ func (m *MockClient) Synthesize(_ context.Context, req SynthesizeRequest) (*Synt
 		Audio:           buf.Bytes(),
 		Format:          req.Format,
 		DurationSeconds: len([]rune(req.Text)) / 4,
+		CharCount:       utf8.RuneCountInString(req.Text),
 		Provider:        "mock",
 		Latency:         5 * time.Millisecond,
 	}, nil

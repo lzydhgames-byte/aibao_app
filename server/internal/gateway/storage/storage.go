@@ -34,7 +34,8 @@ type ObjectMeta struct {
 
 // Client is the object storage abstraction.
 type Client interface {
-	Upload(ctx context.Context, in UploadInput) error
+	// Upload returns bytesUploaded for cost recording; equals in.Size on success (Plan 11B).
+	Upload(ctx context.Context, in UploadInput) (bytesUploaded int64, err error)
 	HeadObject(ctx context.Context, key string) (*ObjectMeta, error)
 	Delete(ctx context.Context, key string) error
 	GetPresignedURL(ctx context.Context, key string, ttl time.Duration) (string, time.Time, error)

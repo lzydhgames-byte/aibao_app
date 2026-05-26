@@ -36,7 +36,9 @@ func (f *fakeStorage) Download(ctx context.Context, key string) (io.ReadCloser, 
 	return io.NopCloser(bytes.NewReader(f.body)), nil
 }
 
-func (f *fakeStorage) Upload(_ context.Context, _ storage.UploadInput) error { return nil }
+func (f *fakeStorage) Upload(_ context.Context, _ storage.UploadInput) (int64, error) {
+	return 0, nil
+}
 func (f *fakeStorage) HeadObject(_ context.Context, _ string) (*storage.ObjectMeta, error) {
 	return nil, storage.ErrNotFound
 }
