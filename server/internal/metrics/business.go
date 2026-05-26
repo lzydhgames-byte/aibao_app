@@ -50,6 +50,18 @@ type Business struct {
 	StorylineEpisodesTotal     prometheus.Counter
 	ChapterHookExtractDuration prometheus.Histogram
 	ChapterHookExtractTotal    *prometheus.CounterVec // labels: status (ok/fail)
+
+	// Plan 11B cost observability (spec §6.1)
+	CostYuanTotal              *prometheus.CounterVec // labels: provider, model, purpose, outcome
+	CostEventRecordFailedTotal *prometheus.CounterVec // labels: reason (bad_event_id|price_miss|queue_full|db_write|nil_usage)
+	CostFlusherBatchSize       prometheus.Histogram
+	CostFlusherLagSeconds      prometheus.Gauge
+	CostOutlineJoinMissTotal   prometheus.Counter
+
+	// Plan 11A outline preview (spec §10.3)
+	OutlineOutcomeTotal           *prometheus.CounterVec // labels: outcome (pending/accepted/refreshed/expired)
+	OutlineSafetyRepairTotal      *prometheus.CounterVec // labels: category, result (retry/success/give_up)
+	OutlinePreviewDurationSeconds prometheus.Histogram
 }
 
 // NewBusiness registers all business metrics on reg and returns the bundle.
@@ -230,6 +242,60 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 				Help: "Count of chapter hook extraction attempts by status (ok/fail).",
 			}, []string{"status"},
 		),
+
+		// ---- Plan 11B cost observability ----
+		CostYuanTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cost_yuan_total",
+				Help: "Cumulative cost in yuan by provider/model/purpose/outcome.",
+			}, []string{"provider", "model", "purpose", "outcome"},
+		),
+		CostEventRecordFailedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cost_event_record_failed_total",
+				Help: "Cost recorder failures by reason.",
+			}, []string{"reason"},
+		),
+		CostFlusherBatchSize: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "cost_flusher_batch_size",
+				Help:    "Flusher batch size distribution.",
+				Buckets: []float64{1, 5, 10, 50, 100, 500, 1000},
+			},
+		),
+		CostFlusherLagSeconds: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "cost_flusher_lag_seconds",
+				Help: "Age of oldest queued cost event in seconds.",
+			},
+		),
+		CostOutlineJoinMissTotal: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "cost_outline_join_miss_total",
+				Help: "outline_events accepted but cost_events missing outline LLM row.",
+			},
+		),
+
+		// ---- Plan 11A outline preview ----
+		OutlineOutcomeTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "outline_outcome_total",
+				Help: "Outline lifecycle outcomes (pending/accepted/refreshed/expired).",
+			}, []string{"outcome"},
+		),
+		OutlineSafetyRepairTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "outline_safety_repair_total",
+				Help: "OutlineSafetyCheck repair retry counts.",
+			}, []string{"category", "result"},
+		),
+		OutlinePreviewDurationSeconds: prometheus.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "outline_preview_duration_seconds",
+				Help:    "End-to-end outline preview LLM call duration.",
+				Buckets: []float64{0.5, 1, 2, 3, 5, 8, 15},
+			},
+		),
 	}
 	reg.MustRegister(
 		b.StoryGenerateTotal,
@@ -260,6 +326,16 @@ func NewBusiness(reg prometheus.Registerer) *Business {
 		b.StorylineEpisodesTotal,
 		b.ChapterHookExtractDuration,
 		b.ChapterHookExtractTotal,
+		// Plan 11B
+		b.CostYuanTotal,
+		b.CostEventRecordFailedTotal,
+		b.CostFlusherBatchSize,
+		b.CostFlusherLagSeconds,
+		b.CostOutlineJoinMissTotal,
+		// Plan 11A
+		b.OutlineOutcomeTotal,
+		b.OutlineSafetyRepairTotal,
+		b.OutlinePreviewDurationSeconds,
 	)
 	return b
 }
