@@ -325,7 +325,15 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init orchestrator: %w", err)
 	}
-	storyHandler := api.NewStoryHandler(orch, storyRepo, childRepo)
+	// Plan 11A §5.5 A2: housekeeping for orphan pending outlines.
+	// Background goroutine ticks every 10min for users with no active session;
+	// /stories list + /heartbeat handlers also call SweepUser for online users.
+	housekeeper := outline.NewHousekeeper(outlineEvents, bm)
+	hkCtx, hkCancel := context.WithCancel(context.Background())
+	defer hkCancel()
+	go housekeeper.Run(hkCtx)
+
+	storyHandler := api.NewStoryHandler(orch, storyRepo, childRepo).WithHousekeeper(housekeeper)
 
 	audioHandler := api.NewAudioHandler(
 		storyRepo, childRepo, storageClient,
@@ -333,7 +341,7 @@ func run() error {
 	)
 
 	// Plan 8: heartbeat handler — time-aware greeting + active storylines list.
-	heartbeatHandler := api.NewHeartbeatHandler(childRepo, storylineRepo, time.Now)
+	heartbeatHandler := api.NewHeartbeatHandler(childRepo, storylineRepo, time.Now).WithHousekeeper(housekeeper)
 
 	counter := middleware.NewRedisCounter(rdb)
 	genRateLimit := middleware.GenerateRateLimit(counter, cfg.LLM.GenerateRPM, time.Minute)

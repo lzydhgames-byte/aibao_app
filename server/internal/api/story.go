@@ -26,16 +26,33 @@ type StoryQuery interface {
 	ListByChild(ctx context.Context, childID int64, limit int) ([]*model.Story, error)
 }
 
+// OutlineHousekeeper is the narrow interface for opportunistic outline
+// expired-marking on user-facing read endpoints (spec §5.5 A2 proactive
+// path). Kept minimal so handlers can be mocked easily and so neither
+// /stories nor /heartbeat depends on the full outline.Housekeeper surface.
+type OutlineHousekeeper interface {
+	SweepUser(ctx context.Context, userID int64)
+}
+
 // StoryHandler exposes the story generation + lookup endpoints.
 type StoryHandler struct {
-	orch     *story.Orchestrator
-	repo     StoryQuery
-	children ChildLookup
+	orch        *story.Orchestrator
+	repo        StoryQuery
+	children    ChildLookup
+	housekeeper OutlineHousekeeper // nil-safe; injected via WithHousekeeper
 }
 
 // NewStoryHandler constructs a StoryHandler.
 func NewStoryHandler(orch *story.Orchestrator, repo StoryQuery, children ChildLookup) *StoryHandler {
 	return &StoryHandler{orch: orch, repo: repo, children: children}
+}
+
+// WithHousekeeper wires the outline housekeeper used by GET /stories to
+// opportunistically expire abandoned pending outlines for the active user
+// (Plan 11A §5.5 A2). Returns the receiver for chaining at construction time.
+func (h *StoryHandler) WithHousekeeper(hk OutlineHousekeeper) *StoryHandler {
+	h.housekeeper = hk
+	return h
 }
 
 // RegisterRoutes mounts /stories/* on an authenticated group. genGuards are
@@ -182,6 +199,11 @@ func (h *StoryHandler) list(c *gin.Context) {
 	}
 	if limit > 50 {
 		limit = 50
+	}
+
+	// Plan 11A §5.5 A2: opportunistic outline housekeeping on every list view.
+	if h.housekeeper != nil {
+		h.housekeeper.SweepUser(c.Request.Context(), uid)
 	}
 
 	ch, err := h.children.FindByID(c.Request.Context(), childID)

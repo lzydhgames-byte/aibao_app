@@ -28,9 +28,10 @@ type HeartbeatStorylineReader interface {
 
 // HeartbeatHandler serves the GET /heartbeat pseudo-push endpoint.
 type HeartbeatHandler struct {
-	children   HeartbeatChildReader
-	storylines HeartbeatStorylineReader
-	now        func() time.Time
+	children    HeartbeatChildReader
+	storylines  HeartbeatStorylineReader
+	now         func() time.Time
+	housekeeper OutlineHousekeeper // nil-safe; injected via WithHousekeeper
 }
 
 // NewHeartbeatHandler constructs a HeartbeatHandler.
@@ -39,6 +40,14 @@ func NewHeartbeatHandler(c HeartbeatChildReader, sr HeartbeatStorylineReader, no
 		now = time.Now
 	}
 	return &HeartbeatHandler{children: c, storylines: sr, now: now}
+}
+
+// WithHousekeeper wires the outline housekeeper used by GET /heartbeat to
+// opportunistically expire abandoned pending outlines for the active user
+// (Plan 11A §5.5 A2). Returns the receiver for chaining at construction time.
+func (h *HeartbeatHandler) WithHousekeeper(hk OutlineHousekeeper) *HeartbeatHandler {
+	h.housekeeper = hk
+	return h
 }
 
 // RegisterRoutes mounts /heartbeat on the given authenticated group.
@@ -75,6 +84,11 @@ func (h *HeartbeatHandler) heartbeat(c *gin.Context) {
 	if child.UserID != uid {
 		RespondError(c, apperr.New(apperr.CodePermissionDenied, "not_owner", "无权访问该孩子档案"))
 		return
+	}
+
+	// Plan 11A §5.5 A2: opportunistic outline housekeeping on every heartbeat.
+	if h.housekeeper != nil {
+		h.housekeeper.SweepUser(c.Request.Context(), uid)
 	}
 
 	lines, lErr := h.storylines.ListActiveByChild(c.Request.Context(), childID, 5)
