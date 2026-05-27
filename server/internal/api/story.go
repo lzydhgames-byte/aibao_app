@@ -61,6 +61,21 @@ type generateReq struct {
 	Topic          string `json:"topic"`
 	StartStoryline bool   `json:"start_storyline"`
 	StorylineID    *int64 `json:"storyline_id,omitempty"`
+
+	// Plan 11A — outline preview integration (spec §6.6).
+	OutlineID        string                `json:"outline_id,omitempty"`
+	OutlineOverrides *outlineOverridesJSON `json:"outline_overrides,omitempty"`
+}
+
+// outlineOverridesJSON is the whitelist of fields the client may override on
+// an outline before generate (spec §6.3). JSON tags act as an implicit
+// whitelist — any other field the client sends is silently dropped by the
+// JSON decoder, so the server never accidentally honours an off-list field
+// like duration_min.
+type outlineOverridesJSON struct {
+	Style            string   `json:"style,omitempty"`
+	Themes           []string `json:"themes,omitempty"`
+	EducationalValue string   `json:"educational_value,omitempty"`
 }
 
 func (h *StoryHandler) generate(c *gin.Context) {
@@ -85,10 +100,36 @@ func (h *StoryHandler) generate(c *gin.Context) {
 		})
 		return
 	}
+	// Plan 11A §6.6: outline_id is mutually exclusive with both storyline modes.
+	if req.OutlineID != "" && req.StorylineID != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"reason":   "conflicting_modes",
+			"user_msg": "outline_id 与 storyline_id 互斥，二选一",
+		})
+		return
+	}
+	if req.OutlineID != "" && req.StartStoryline {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"reason":   "conflicting_modes",
+			"user_msg": "outline_id 与 start_storyline 互斥",
+		})
+		return
+	}
+	var ovr *story.OutlineOverrides
+	if req.OutlineOverrides != nil {
+		ovr = &story.OutlineOverrides{
+			Style:            req.OutlineOverrides.Style,
+			Themes:           req.OutlineOverrides.Themes,
+			EducationalValue: req.OutlineOverrides.EducationalValue,
+		}
+	}
 	out, err := h.orch.Generate(c.Request.Context(), story.GenerateParams{
 		ChildID: req.ChildID, UserID: uid,
 		Prompt: req.Prompt, Duration: req.Duration, Style: req.Style, Topic: req.Topic,
 		StartStoryline: req.StartStoryline, StorylineID: req.StorylineID,
+		// Plan 11A
+		OutlineID:        req.OutlineID,
+		OutlineOverrides: ovr,
 	})
 	if err != nil {
 		RespondError(c, err)

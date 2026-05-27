@@ -18,6 +18,7 @@ import (
 	"github.com/aibao/server/internal/pkg/traceid"
 	"github.com/aibao/server/internal/repository"
 	costsvc "github.com/aibao/server/internal/service/cost"
+	"github.com/aibao/server/internal/service/outlinecontract"
 	"github.com/aibao/server/internal/service/safety"
 	"github.com/aibao/server/internal/service/story/prompt"
 )
@@ -64,6 +65,13 @@ type ChapterHookAPI interface {
 	ExtractForStory(ctx context.Context, storyText string, childID, storyID int64, userID *int64, traceHex string) string
 }
 
+// OutlineEventAppender is the narrow append-only surface the orchestrator
+// needs from service/outline.EventStore. Defined here so story does not
+// reverse-import the outline package (spec §7.5 N5).
+type OutlineEventAppender interface {
+	Append(ctx context.Context, evt model.OutlineEvent) error
+}
+
 // Deps groups Orchestrator dependencies.
 type Deps struct {
 	Stories         StoryRepo
@@ -84,6 +92,14 @@ type Deps struct {
 	StoryModel      string
 	Temperature     float64
 	PromptVersion   string
+
+	// Plan 11A — outline preview injection (spec §7.3 Step 0 / §7.5 N5).
+	// OutlineResolver is the contract implemented by service/outline.ResolverImpl;
+	// story depends on the contract only to avoid bidirectional packages.
+	OutlineResolver outlinecontract.OutlineResolver
+	// OutlineEvents writes the outcome=accepted lifecycle event when an
+	// outline_id is consumed by /stories/generate.
+	OutlineEvents OutlineEventAppender
 }
 
 // Orchestrator runs the PreCheck → PromptBuild → LLM → PostCheck → Persist
@@ -117,6 +133,18 @@ type GenerateParams struct {
 	Topic          string
 	StartStoryline bool   // Plan 8: create a new storyline; this story = episode 1
 	StorylineID    *int64 // Plan 8: continue an existing storyline
+
+	// Plan 11A — outline preview path (spec §7.3 Step 0).
+	OutlineID        string
+	OutlineOverrides *OutlineOverrides
+}
+
+// OutlineOverrides is the whitelist of fields the client may override on
+// an outline before story generation (spec §6.3). Empty fields = no override.
+type OutlineOverrides struct {
+	Style            string
+	Themes           []string
+	EducationalValue string
 }
 
 // Generate is the main entry point.
@@ -126,6 +154,70 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 	// Plan 8: defense-in-depth mutual-exclusion check.
 	if p.StartStoryline && p.StorylineID != nil {
 		return nil, apperr.New(apperr.CodeInvalidArgument, "invalid_argument", "不能同时启动新连续剧和续接已有连续剧")
+	}
+
+	// Plan 11A §6.6 / §10.1: outline_id is mutually exclusive with storyline modes.
+	if p.OutlineID != "" && (p.StartStoryline || p.StorylineID != nil) {
+		return nil, apperr.New(apperr.CodeInvalidArgument, "conflicting_modes", "outline_id 与 storyline 模式互斥")
+	}
+
+	// Plan 11A Step 0: HydrateFromOutline. Resolve outline_id (ownership +
+	// replay defense), apply whitelist overrides, mark accepted, then hydrate
+	// p with outline-derived style/topic/duration before the rest of the
+	// pipeline runs. Spec §6.6: when outline_id is present, raw style/topic/
+	// duration from the request body are ignored.
+	if p.OutlineID != "" {
+		if o.d.OutlineResolver == nil {
+			return nil, apperr.New(apperr.CodeInternal, "outline_resolver_missing", "服务器开小差了")
+		}
+		ol, rerr := o.d.OutlineResolver.Resolve(ctx, p.OutlineID, p.UserID, p.ChildID)
+		if rerr != nil {
+			switch {
+			case errors.Is(rerr, outlinecontract.ErrOutlineExpired):
+				return nil, apperr.New(apperr.CodeOutlineExpired, "outline_expired", "大纲已过期，请重新预览")
+			case errors.Is(rerr, outlinecontract.ErrOutlineForbidden):
+				return nil, apperr.New(apperr.CodePermissionDenied, "outline_not_yours", "大纲不属于你")
+			default:
+				return nil, apperr.Wrap(rerr, apperr.CodeInternal, "outline_resolve", "服务器开小差了")
+			}
+		}
+		// Apply whitelist overrides (spec §6.3). Server is source of truth
+		// for what is overridable — only these three fields.
+		if p.OutlineOverrides != nil {
+			if p.OutlineOverrides.Style != "" {
+				ol.Style = p.OutlineOverrides.Style
+			}
+			if len(p.OutlineOverrides.Themes) > 0 {
+				ol.Themes = p.OutlineOverrides.Themes
+			}
+			if p.OutlineOverrides.EducationalValue != "" {
+				ol.EducationalValue = p.OutlineOverrides.EducationalValue
+			}
+		}
+		// Hydrate p with outline-derived values (spec §6.6).
+		p.Style = ol.Style
+		if len(ol.Themes) > 0 {
+			p.Topic = ol.Themes[0]
+		}
+		p.Duration = ol.DurationMin
+
+		// Append accepted lifecycle event before LLM call. Failure is
+		// non-fatal — Aggregator can recompute from cost_events if missing.
+		if o.d.OutlineEvents != nil {
+			// "accepted" literal (not outline.OutcomeAccepted) so story does
+			// not reverse-import the outline package — spec §7.5 N5.
+			if appendErr := o.d.OutlineEvents.Append(ctx, model.OutlineEvent{
+				OutlineID:            p.OutlineID,
+				OutlineGroupID:       ol.OutlineGroupID,
+				UserID:               p.UserID,
+				Outcome:              "accepted",
+				OutlinePromptVersion: ol.OutlinePromptVersion,
+				DurationMin:          ol.DurationMin,
+			}); appendErr != nil {
+				lg.Warn("story.outline.append_accepted_failed", "err", appendErr, "outline_id", p.OutlineID)
+			}
+		}
+		_ = ol
 	}
 
 	child, err := o.d.Children.FindByID(ctx, p.ChildID)

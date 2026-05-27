@@ -293,6 +293,12 @@ func run() error {
 	chapterHook := storysvc.NewChapterHookExtractor(llmClient, cfg.LLM.IntentModel, 0.4, bm, lg).WithCost(costRecorder, idHasher)
 	storylineCtxBld := storysvc.NewStorylineContextBuilder(storylineRepo, storyRepo, memoryRepo, lg)
 
+	// Plan 11A — outline cache/events + resolver must be wired before the
+	// story orchestrator so Step 0 HydrateFromOutline can resolve outline_id.
+	outlineCache := outline.NewCache(rdb)
+	outlineEvents := outline.NewEventStore(db)
+	outlineResolver := outline.NewResolver(outlineCache, outlineEvents)
+
 	orch, err := storysvc.NewOrchestrator(storysvc.Deps{
 		Stories:         storyRepo,
 		Children:        childRepo,
@@ -312,6 +318,9 @@ func run() error {
 		StoryModel:      cfg.LLM.StoryModel,
 		Temperature:     cfg.LLM.StoryTemperature,
 		PromptVersion:   "v1",
+		// Plan 11A — outline preview integration (spec §7.3 / §7.5 N5).
+		OutlineResolver: outlineResolver,
+		OutlineEvents:   outlineEvents,
 	})
 	if err != nil {
 		return fmt.Errorf("init orchestrator: %w", err)
@@ -332,8 +341,6 @@ func run() error {
 
 	// Plan 11A — outline preview + refresh share a per-user 5/min bucket
 	// (spec §6.4). Wiring lives next to the other rate limits for clarity.
-	outlineCache := outline.NewCache(rdb)
-	outlineEvents := outline.NewEventStore(db)
 	outlineMatcher := safety.NewKeywordMatcher(rs.AllRedlinesFlat)
 	outlineSvc := outline.NewService(outline.Deps{
 		LLM:      llmClient,
