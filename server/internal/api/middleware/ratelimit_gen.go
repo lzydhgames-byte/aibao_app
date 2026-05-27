@@ -39,13 +39,21 @@ func (r *RedisCounter) IncrWithTTL(ctx context.Context, key string, ttl time.Dur
 
 // GenerateRateLimit limits each authenticated user to maxPerWindow requests per window.
 func GenerateRateLimit(counter Counter, maxPerWindow int, window time.Duration) gin.HandlerFunc {
+	return PerUserRateLimit(counter, "gen", maxPerWindow, window)
+}
+
+// PerUserRateLimit is the generalized form of GenerateRateLimit with a
+// caller-supplied bucket prefix. Two endpoints that share the same bucket
+// (e.g. outline preview + refresh, spec §6.4) pass the same prefix so a
+// single Redis key counts both.
+func PerUserRateLimit(counter Counter, bucket string, maxPerWindow int, window time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uid, ok := userctx.FromContext(c.Request.Context())
 		if !ok {
 			c.Next()
 			return
 		}
-		key := fmt.Sprintf("rate:gen:%d", uid)
+		key := fmt.Sprintf("rate:%s:%d", bucket, uid)
 		count, err := counter.IncrWithTTL(c.Request.Context(), key, window)
 		if err != nil {
 			c.Next()

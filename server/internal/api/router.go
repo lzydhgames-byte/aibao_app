@@ -37,6 +37,11 @@ type RouterDeps struct {
 
 	// Heartbeat (Plan 8)
 	Heartbeat *HeartbeatHandler
+
+	// Outline (Plan 11A) — preview + refresh share a single per-user
+	// rate-limit bucket (spec §6.4). OutlineRateLimit applies to BOTH endpoints.
+	Outline          *OutlineHandler
+	OutlineRateLimit gin.HandlerFunc
 }
 
 // NewRouter builds the gin.Engine with the standard middleware chain,
@@ -83,6 +88,13 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		}
 		if deps.Heartbeat != nil {
 			deps.Heartbeat.RegisterRoutes(auth)
+		}
+		if deps.Outline != nil {
+			var outlineGuards []gin.HandlerFunc
+			if deps.OutlineRateLimit != nil {
+				outlineGuards = append(outlineGuards, deps.OutlineRateLimit)
+			}
+			deps.Outline.RegisterRoutes(auth, outlineGuards...)
 		}
 		if deps.Story != nil {
 			var genGuards []gin.HandlerFunc

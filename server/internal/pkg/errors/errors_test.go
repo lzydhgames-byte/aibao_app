@@ -42,6 +42,8 @@ func TestHTTPStatus_AllCodes(t *testing.T) {
 		CodeRateLimited:      http.StatusTooManyRequests,
 		CodeBudgetExceeded:   http.StatusServiceUnavailable,
 		CodeInternal:         http.StatusInternalServerError,
+		CodeOutlineExpired:   http.StatusGone,
+		CodeSafetyRejected:   http.StatusUnprocessableEntity,
 	}
 	for c, want := range cases {
 		assert.Equal(t, want, New(c, "x", "y").HTTPStatus(), "code=%v", c)

@@ -35,6 +35,12 @@ const (
 	CodeBudgetExceeded
 	// CodeInternal indicates an unexpected server error. Maps to 500.
 	CodeInternal
+	// CodeOutlineExpired indicates an outline ticket TTL elapsed or it has
+	// already entered a terminal state. Maps to 410 (Plan 11A §6.5).
+	CodeOutlineExpired
+	// CodeSafetyRejected indicates content safety violation (outline or
+	// downstream). Maps to 422 (Plan 11A §6.5).
+	CodeSafetyRejected
 )
 
 // AppError is the unified application error used by the service layer.
@@ -82,6 +88,10 @@ func (e *AppError) HTTPStatus() int {
 		return http.StatusTooManyRequests
 	case CodeBudgetExceeded:
 		return http.StatusServiceUnavailable
+	case CodeOutlineExpired:
+		return http.StatusGone
+	case CodeSafetyRejected:
+		return http.StatusUnprocessableEntity
 	default:
 		return http.StatusInternalServerError
 	}

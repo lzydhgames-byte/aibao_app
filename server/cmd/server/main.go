@@ -41,6 +41,7 @@ import (
 	"github.com/aibao/server/internal/service/audio"
 	costsvc "github.com/aibao/server/internal/service/cost"
 	memorysvc "github.com/aibao/server/internal/service/memory"
+	"github.com/aibao/server/internal/service/outline"
 	"github.com/aibao/server/internal/service/safety"
 	storysvc "github.com/aibao/server/internal/service/story"
 	"github.com/aibao/server/internal/worker"
@@ -329,6 +330,25 @@ func run() error {
 	genRateLimit := middleware.GenerateRateLimit(counter, cfg.LLM.GenerateRPM, time.Minute)
 	budgetGuard := middleware.BudgetGuard(budget)
 
+	// Plan 11A — outline preview + refresh share a per-user 5/min bucket
+	// (spec §6.4). Wiring lives next to the other rate limits for clarity.
+	outlineCache := outline.NewCache(rdb)
+	outlineEvents := outline.NewEventStore(db)
+	outlineMatcher := safety.NewKeywordMatcher(rs.AllRedlinesFlat)
+	outlineSvc := outline.NewService(outline.Deps{
+		LLM:      llmClient,
+		LLMModel: cfg.LLM.IntentModel,
+		Matcher:  outlineMatcher,
+		PreCheck: preChecker,
+		Cache:    outlineCache,
+		Events:   outlineEvents,
+		Recorder: costRecorder,
+		IDHasher: idHasher,
+		Biz:      bm,
+	})
+	outlineHandler := api.NewOutlineHandler(outlineSvc, outlineCache, outlineEvents, childRepo)
+	outlineRateLimit := middleware.PerUserRateLimit(counter, "outline", 5, time.Minute)
+
 	router := api.NewRouter(api.RouterDeps{
 		Metrics:      m,
 		Reg:          reg,
@@ -342,8 +362,10 @@ func run() error {
 		GenRateLimit: genRateLimit,
 		BudgetGuard:  budgetGuard,
 		Audio:        audioHandler,
-		Bootstrap:    bootstrapHandler,
-		Heartbeat:    heartbeatHandler,
+		Bootstrap:        bootstrapHandler,
+		Heartbeat:        heartbeatHandler,
+		Outline:          outlineHandler,
+		OutlineRateLimit: outlineRateLimit,
 	})
 
 	workerCtx, workerCancel := context.WithCancel(context.Background())
