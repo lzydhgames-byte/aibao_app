@@ -132,13 +132,89 @@ func (h *OutlineHandler) preview(c *gin.Context) {
 	})
 }
 
-// refresh handles POST /api/v1/outlines/:id/refresh. Task 20 will implement
-// the full pipeline (parent outline lookup → group inheritance → new variant).
-// For now we return 501 so the route exists for shared-bucket rate-limit wiring.
+// refresh handles POST /api/v1/outlines/:id/refresh.
+// "换个角度" — invalidates the parent outline, appends a refreshed event, then
+// regenerates a new outline in the same outline_group_id with VariantIndex++.
+// Spec §6.2 + §10.3: ratelimit bucket shared with preview (5/min combined per user).
 func (h *OutlineHandler) refresh(c *gin.Context) {
-	c.AbortWithStatusJSON(http.StatusNotImplemented, gin.H{
-		"reason":   "not_implemented",
-		"user_msg": "刷新功能开发中",
+	uid, ok := userctx.FromContext(c.Request.Context())
+	if !ok {
+		RespondError(c, apperr.New(apperr.CodeUnauthenticated, "unauthorized", "请先登录"))
+		return
+	}
+	parentID := c.Param("id")
+	if parentID == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"reason":   "invalid_argument",
+			"user_msg": "outline_id 缺失",
+		})
+		return
+	}
+
+	// Step 1: cache lookup for parent (404 if missed/expired — spec §5.2).
+	parent, err := h.cache.Get(c.Request.Context(), parentID)
+	if errors.Is(err, outline.ErrCacheMiss) {
+		RespondError(c, apperr.New(apperr.CodeNotFound, "outline_not_found", "outline 不存在或已过期"))
+		return
+	}
+	if err != nil {
+		RespondError(c, apperr.New(apperr.CodeInternal, "cache_get", "服务器开小差了"))
+		return
+	}
+
+	// Step 2: ownership check.
+	if parent.UserID != uid {
+		RespondError(c, apperr.New(apperr.CodePermissionDenied, "outline_not_yours", "outline 不属于你"))
+		return
+	}
+
+	// Step 3: best-effort invalidate + refreshed event. Neither failure must
+	// block Preview (spec §3.3): logical-only duplicate group_id is fine.
+	_ = h.cache.Invalidate(c.Request.Context(), parentID)
+	_ = h.events.Append(c.Request.Context(), model.OutlineEvent{
+		OutlineID:            parentID,
+		OutlineGroupID:       parent.OutlineGroupID,
+		UserID:               uid,
+		Outcome:              outline.OutcomeRefreshed,
+		OutlinePromptVersion: parent.OutlinePromptVersion,
+		DurationMin:          parent.DurationMin,
+	})
+
+	// Step 4: fetch child for Preview (own re-verification).
+	child, err := h.children.FindByID(c.Request.Context(), parent.ChildID)
+	if err != nil || child == nil || child.UserID != uid {
+		RespondError(c, apperr.New(apperr.CodePermissionDenied, "child_not_yours", "孩子档案缺失"))
+		return
+	}
+
+	// Step 5: regenerate; Service.Preview inherits group_id + bumps variant_index
+	// when ParentOutlineID is set.
+	res, err := h.svc.Preview(c.Request.Context(), outline.PreviewInput{
+		UserID:          uid,
+		ChildID:         parent.ChildID,
+		ChildNickname:   child.Nickname,
+		ChildAge:        childAgeYears(child.Birthday),
+		ChildFears:      nil, // TODO Task 23
+		IPBlacklist:     nil,
+		IPWhitelist:     nil,
+		Prompt:          parent.PromptText,
+		DurationMin:     parent.DurationMin,
+		ParentOutlineID: parentID,
+	})
+	if err != nil {
+		var ae *apperr.AppError
+		if errors.As(err, &ae) {
+			RespondError(c, ae)
+			return
+		}
+		RespondError(c, apperr.New(apperr.CodeInternal, "internal", "服务器开小差了"))
+		return
+	}
+
+	c.JSON(http.StatusOK, previewResp{
+		OutlineID: res.OutlineID,
+		Outline:   outlineToJSON(res.Outline),
+		ExpiresAt: res.ExpiresAt,
 	})
 }
 
