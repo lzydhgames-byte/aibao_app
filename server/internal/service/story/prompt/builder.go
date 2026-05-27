@@ -123,6 +123,13 @@ func pickSceneSeed() string {
 	return sceneSeeds[sceneRNG.Intn(len(sceneSeeds))]
 }
 
+// PickSceneSeed returns one of the 80-element scene-seed pool, uniformly
+// random. Exposed for outline package (Plan 11A §5.1) — internal pool stays
+// unexported to discourage direct mutation.
+func PickSceneSeed() string {
+	return pickSceneSeed()
+}
+
 // BuildInput is the structured input for assembling a system prompt.
 type BuildInput struct {
 	ChildNickname            string
