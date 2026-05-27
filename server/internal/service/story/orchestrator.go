@@ -161,6 +161,15 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		return nil, apperr.New(apperr.CodeInvalidArgument, "conflicting_modes", "outline_id 与 storyline 模式互斥")
 	}
 
+	// Plan 11A Task 22: outline hint fields propagated into BuildInput so the
+	// system prompt's "预先设定" block honors the parent-confirmed outline.
+	// Declared at function scope so they survive past the step 0 if block.
+	var (
+		outlineTitleHint            string
+		outlineSynopsisHint         string
+		outlineEducationalValueHint string
+	)
+
 	// Plan 11A Step 0: HydrateFromOutline. Resolve outline_id (ownership +
 	// replay defense), apply whitelist overrides, mark accepted, then hydrate
 	// p with outline-derived style/topic/duration before the rest of the
@@ -217,6 +226,9 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 				lg.Warn("story.outline.append_accepted_failed", "err", appendErr, "outline_id", p.OutlineID)
 			}
 		}
+		outlineTitleHint = ol.Title
+		outlineSynopsisHint = ol.Synopsis
+		outlineEducationalValueHint = ol.EducationalValue
 		_ = ol
 	}
 
@@ -303,6 +315,9 @@ func (o *Orchestrator) Generate(ctx context.Context, p GenerateParams) (*model.S
 		NormalizedIPInstructions: preOut.IPInstructions,
 		MemorySummary:            memCtx,
 		PromptVersion:            o.d.PromptVersion,
+		TitleHint:                outlineTitleHint,
+		SynopsisHint:             outlineSynopsisHint,
+		EducationalValueHint:     outlineEducationalValueHint,
 	}
 	if storylineCtx != nil {
 		buildIn.StorylineHook = storylineCtx.PreviousHook

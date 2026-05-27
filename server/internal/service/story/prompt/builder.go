@@ -147,6 +147,14 @@ type BuildInput struct {
 	StorylineRecentSummaries []string // Plan 8: up to 3 previous episode summaries, newest first
 	EpisodeNumber            int      // Plan 8: the upcoming episode number (>=2 for sequels)
 	PromptVersion            string   // e.g. "v1"
+
+	// Plan 11A — outline hints (spec §7.3 §B1).
+	// When non-empty, the system prompt includes a "预先设定" block that asks
+	// the LLM to honor the outline-confirmed title/synopsis/educational value.
+	// Empty values keep the block hidden (no template change for non-outline path).
+	TitleHint            string
+	SynopsisHint         string
+	EducationalValueHint string
 }
 
 // BuildOutput is the assembled prompt.
@@ -191,6 +199,9 @@ type templateVars struct {
 	StorylineRecentSummaries []string
 	EpisodeNumber            int
 	PromptVersion            string
+	TitleHint                string
+	SynopsisHint             string
+	EducationalValueHint     string
 }
 
 // Build renders the system prompt and returns it together with the cleaned user prompt.
@@ -215,6 +226,9 @@ func (b *Builder) Build(in BuildInput) BuildOutput {
 		StorylineRecentSummaries: in.StorylineRecentSummaries,
 		EpisodeNumber:            in.EpisodeNumber,
 		PromptVersion:            in.PromptVersion,
+		TitleHint:                in.TitleHint,
+		SynopsisHint:             in.SynopsisHint,
+		EducationalValueHint:     in.EducationalValueHint,
 	}
 	var buf bytes.Buffer
 	if err := b.tmpl.Execute(&buf, vars); err != nil {

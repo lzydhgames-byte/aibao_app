@@ -77,3 +77,11 @@
 - 故事开头爱宝可以已经在场景里和{{.ChildNickname}}一起，不必每次"主动出场打招呼"。
 - 故事结尾爱宝总结一句温暖的话，呼应教育主题。
 - prompt 版本：{{.PromptVersion}}
+{{- if .TitleHint }}
+
+## 本故事的预先设定（家长已确认）
+- 标题：{{ .TitleHint }}
+- 梗概：{{ .SynopsisHint }}
+- 教育意义目标：{{ .EducationalValueHint }}
+请把以上设定作为故事骨架展开为完整故事，**不要偏离梗概的主要情节走向**。
+{{- end }}

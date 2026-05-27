@@ -211,6 +211,41 @@ func TestBuild_StorylineSection_OmittedWhenBothEmpty(t *testing.T) {
 	assert.NotContains(t, out.SystemPrompt, "上一集剧情")
 }
 
+func TestBuild_WithOutlineHints(t *testing.T) {
+	b, err := NewBuilder(templatePath)
+	require.NoError(t, err)
+	out := b.Build(BuildInput{
+		ChildNickname:        "小宇",
+		ChildAgeYears:        5,
+		ChildGender:          "boy",
+		Duration:             5,
+		Style:                "冒险探索",
+		UserPromptCleaned:    "想去太空",
+		TitleHint:            "小宇的星空冒险",
+		SynopsisHint:         "小宇遇到爱宝，他们一起穿越到星空之上……",
+		EducationalValueHint: "学到勇气与团队合作",
+		PromptVersion:        "v1",
+	})
+	assert.Contains(t, out.SystemPrompt, "本故事的预先设定")
+	assert.Contains(t, out.SystemPrompt, "小宇的星空冒险")
+	assert.Contains(t, out.SystemPrompt, "学到勇气与团队合作")
+}
+
+func TestBuild_WithoutOutlineHints_BackCompat(t *testing.T) {
+	b, err := NewBuilder(templatePath)
+	require.NoError(t, err)
+	out := b.Build(BuildInput{
+		ChildNickname:     "小宇",
+		ChildAgeYears:     5,
+		ChildGender:       "boy",
+		Duration:          5,
+		Style:             "冒险探索",
+		UserPromptCleaned: "想去太空",
+		PromptVersion:     "v1",
+	})
+	assert.NotContains(t, out.SystemPrompt, "本故事的预先设定")
+}
+
 func TestBuilder_RuneCountRoughlyMatchesDuration(t *testing.T) {
 	b, err := NewBuilder(templatePath)
 	require.NoError(t, err)
