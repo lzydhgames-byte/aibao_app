@@ -7,6 +7,7 @@ import 'screens/create_child_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/generate_screen.dart';
+import 'screens/outline_screen.dart';
 import 'screens/player_screen.dart';
 import 'state/auth_state.dart';
 import 'state/child_state.dart';
@@ -79,6 +80,10 @@ GoRouter buildRouter(Ref ref) {
             storylineId: s == null ? null : int.tryParse(s),
           );
         },
+      ),
+      GoRoute(
+        path: '/outline',
+        builder: (_, __) => const OutlineScreen(),
       ),
       GoRoute(
         path: '/player/:id',
