@@ -30,6 +30,10 @@ Day 2 修完 COS 上传"三层洋葱"故障：① 网络层——香港→上海
 
 Plan 10 收官：朋友可拿手机直接试用爱宝。
 
+**Plan 11 代码侧完成（2026-05-28，30/32 task）**：AI 大纲预览（11A B 模式）+ 成本可观测（11B Thin Slice + Full Build）。Codex 三轮 review 通过；subagent-driven 执行 4 sprint × 7 工作日 × 31 commits。后端：`outlinecontract` 中立合约包打破 story↔outline 双向依赖；append-only `outline_events`（v8）+ `cost_events`（v9 with event_id 业务语义化幂等）；HMAC-SHA256 12hex `pkg/idhash`；纯函数 `pkg/cost` PriceBook + Calc；`service/cost` Recorder/Flusher/Aggregator + `cmd/cost-report` cobra CLI；OutlineSafetyCheck 输出端 4 类校验（红线/害怕/主角/IP）+ schema-repair 2 阶段；CI `make check-layering` 守 gateway 不依赖 service。Flutter：generate_screen 三分支路由（续集 / flag-off / outline）；outline_screen 含 5min 倒计时 + 3 action；`FeatureFlags.outlineEnabled` 编译时控。详见 `docs/devlog/2026-05-28-plan-11-codeside-complete.md` + plan 文件附录 A 实施期偏差日志。
+
+待补 Task 31（真链路对账）+ 32（收官追述），依赖上线 ≥ 24 小时 + 拉厂商账单。
+
 权威文档：
 - 产品设计 spec：[docs/superpowers/specs/2026-04-28-aibao-design.md](docs/superpowers/specs/2026-04-28-aibao-design.md)
 - 技术架构 spec：[docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md](docs/superpowers/specs/2026-04-28-aibao-tech-architecture.md)
@@ -43,6 +47,9 @@ Plan 10 收官：朋友可拿手机直接试用爱宝。
 - 已完成的 Plan 8：[docs/superpowers/plans/2026-05-14-plan-08-storyline-and-heartbeat.md](docs/superpowers/plans/2026-05-14-plan-08-storyline-and-heartbeat.md)
 - 已完成的 Plan 9-A：[docs/superpowers/plans/2026-05-15-plan-09a-flutter-mvp-demo.md](docs/superpowers/plans/2026-05-15-plan-09a-flutter-mvp-demo.md)（4 屏 MVP，真 OPPO 端到端通过）
 - 已完成的 Plan 9b：[docs/superpowers/plans/2026-05-16-plan-09b-flutter-ui-completion.md](docs/superpowers/plans/2026-05-16-plan-09b-flutter-ui-completion.md)（BOOTSTRAP / HEARTBEAT / 故事历史 / 续集 / 新孩子 / nickname UTF-8）
+- Plan 11A spec：[docs/superpowers/specs/2026-05-25-plan-11a-ai-outline-preview.md](docs/superpowers/specs/2026-05-25-plan-11a-ai-outline-preview.md)（AI 大纲预览 / B 模式）
+- Plan 11B spec：[docs/superpowers/specs/2026-05-25-plan-11b-cost-observability.md](docs/superpowers/specs/2026-05-25-plan-11b-cost-observability.md)（成本可观测）
+- Plan 11 实施计划 + 附录 A 偏差日志：[docs/superpowers/plans/2026-05-25-plan-11-ai-outline-and-cost-observability.md](docs/superpowers/plans/2026-05-25-plan-11-ai-outline-and-cost-observability.md)
 
 ### 已落地的能力（不要重做）
 - 后端骨架（Go + Gin + GORM + slog + Prometheus + 健康检查 + 优雅关停）
@@ -80,6 +87,10 @@ Plan 10 收官：朋友可拿手机直接试用爱宝。
 - **挡位**：从 5/10/15 改为 **3/5/8 分钟**（Plan 9c）；fallback 文件随之 rename（10min→5min, 5min→3min, 8min 无独立文件 fallback 到 5min）
 - **SceneSeed 多样性注入**（Plan 9c）：`prompt.builder` 内置 80 个场景种子分 9 大类，每次随机抽 1 注入 prompt 的"本次场景灵感"区；同时模板加"避免套路"明文段
 - **超时栈整体上调**（Plan 9c）：LLM gateway 30→90s、dio receiveTimeout 60→180s
+- **AI 大纲预览 B 模式**（Plan 11A）：`POST /outlines/preview` 用 doubao-lite 2 秒返大纲卡（title/synopsis/themes/style/educational_value）；`POST /outlines/:id/refresh` 同 group 换角度（VariantIndex++）；用户确认后 `POST /stories/generate {outline_id}` 进正文；redis 5min TTL 票据 + outline_events append-only PG 表生命周期 + 三元 ownership（user+child+outline）+ replay defense；OutlineSafetyCheck 输出端红线/害怕/主角/IP 四类校验 + 2 阶段 schema-repair retry；与 storyline 续集模式互斥（return 400 conflicting_modes）；正文 prompt 注入 TitleHint/SynopsisHint/EducationalValueHint 保大纲与正文首尾呼应；housekeeping 双路径（用户进 /stories /heartbeat 主动扫 + 10min 后台兜底）
+- **成本可观测基础设施**（Plan 11B）：`cost_events` PG 表（event_id `{trace_id}:{purpose}:{stage}:{attempt}` 业务语义化幂等 + price snapshot JSONB）+ Prometheus 双轨观测；`pkg/cost` PriceBook + Calc 纯函数；`pkg/idhash` HMAC-SHA256 12hex + domain separation；`service/cost` Recorder（同步 metric + 异步队列）+ Flusher（60s batch + ON CONFLICT DO NOTHING）+ Aggregator（Overall/ByPurpose/TopUsers/OutlineSaving full pipeline 公式）；`cmd/cost-report` cobra CLI；`make check-layering` CI 守 gateway 不依赖 service
+- **service/outlinecontract 中立合约包**（Plan 11A §7.5 N5）：仅接口 + DTO + errors 零 IO 零实现；解决 service/story ↔ service/outline 双向依赖；编译期断言 ResolverImpl 实现接口
+- **Flutter B 模式 UI**（Plan 11A §8）：generate_screen 三分支路由（续集 → LegacyGenerateScreen / FeatureFlags.outlineEnabled=false → LegacyGenerateScreen / 默认 → 极简 prompt+duration）；outline_screen 含 5min 倒计时 + 3 action（开始生成/换个角度/返回修改）；`outlinePreviewProvider` (FutureProvider.family) + `currentOutlineProvider`（StateProvider）；紧急回滚 `flutter build --dart-define=OUTLINE_ENABLED=false`
 - 知识库 12 主题 140+ 词条（用户复盘用）
 
 ### 端到端可演示接口（已通过冒烟）
@@ -96,9 +107,12 @@ Plan 10 收官：朋友可拿手机直接试用爱宝。
 - `POST /api/v1/stories/generate` 现支持 `start_storyline` / `storyline_id` 字段；响应含 `storyline_id` + `episode_no`
 - `GET /api/v1/heartbeat?child_id=N`（需 Bearer JWT；时段问候 + 活跃 storyline 列表）
 - `GET /api/v1/stories?child_id=N&limit=5`（需 Bearer JWT；按 created_at DESC 列出，limit ≤ 50）
+- `POST /api/v1/outlines/preview`（需 Bearer JWT；Plan 11A，限流 5/min 与 refresh 共享桶；返 outline_id + outline + expires_at）
+- `POST /api/v1/outlines/:id/refresh`（需 Bearer JWT；Plan 11A，同 group VariantIndex++）
+- `POST /api/v1/stories/generate` 现支持 `outline_id` + `outline_overrides`（仅 style/themes/educational_value 白名单）字段；与 storyline 字段互斥
 
-### Flutter 客户端（Plan 9-A + 9b 已实现）
-- **屏幕**：login / home（欢迎语 + heartbeat + bootstrap 提示 + 孩子卡片 + 故事历史列表 + 生成 CTA + 续集卡片）/ create_child（首次孩子档案）/ bootstrap（7 题档案问卷）/ generate（含 `storyline_id` 续集模式 + 3/5/8 分钟 + 5 风格）/ player（故事文本 + just_audio + 续集 #N 标识 + audio_url 8s 轮询）
+### Flutter 客户端（Plan 9-A + 9b + 11A 已实现）
+- **屏幕**：login / home / create_child / bootstrap / generate（Plan 11A 三分支：续集→legacy / outline_enabled=false→legacy / 默认→极简 prompt+duration）/ outline（Plan 11A 大纲卡+5min倒计时+3action）/ player（故事文本 + just_audio + 续集 #N 标识 + audio_url 8s 轮询）/ legacy_generate（保留作 fallback）
 - **技术栈**：Flutter SDK 3.29.3 + Riverpod 2.6.1 + dio + go_router + just_audio + flutter_secure_storage
 - **平台**：Android（debug 模式真机 OPPO PJJ110 端到端通过；release / iOS / desktop 留给 Plan 10）
 - **关键状态修复**（Plan 9b 拐角踩坑总结）：authProvider ↔ apiClientProvider 通过无依赖 `authSnapshotProvider` 中间人打破循环；childProvider 在 login/logout 显式 invalidate；401 interceptor 必须先看 isAuthenticated 才能调 logout；storyListProvider 在生成成功跳转前必须 invalidate
