@@ -1,4 +1,4 @@
-.PHONY: build run-dev test test-integration lint rules-lint migrate-up migrate-down seed-bgm clean
+.PHONY: build run-dev test test-integration lint rules-lint migrate-up migrate-down seed-bgm clean check-layering
 
 GO := go
 BINARY := bin/aibao-server
@@ -52,3 +52,7 @@ seed-bgm:
 
 clean:
 	rm -rf bin logs
+
+# Plan 11B §3.5: enforce gateway/ does not import service/repository/api.
+check-layering:
+	@bash scripts/check_layering.sh
