@@ -4364,3 +4364,66 @@ git commit -m "docs(plan11): close out — outline B-mode + cost observability l
 2. **Inline Execution** —— 本会话直接执行；按检查点（建议每个 Sprint 一个）批量推进；上下文连贯但累积压力大
 
 **选哪种？**
+
+---
+
+## 附录 A — 实施期偏差日志（Sprint A+B+C 累积，2026-05-25 ~ 2026-05-28）
+
+> 本节是 implementation phase 沉淀，**写于 28/32 task 完成后**。
+> Plan 写作时凭印象假设的"项目 API 长什么样"，实际实施时 subagent 发现多处不一致。
+> 这里**逐条记录正确的 API**，供未来 Plan 11C+ / Sprint D 后续 task / 类似 plan 重用 — 不再重复踩同样的坑。
+
+### 后端（Go）
+
+| Plan 写法 | 项目实际 | 影响 task | 说明 |
+|---|---|---|---|
+| `promauto.NewCounterVec(...)` 全局 var | `metrics.Business` struct + 注入 + 显式 `reg.MustRegister(...)` | Task 8 (Recorder) | Plan 1 立的注入模式；所有业务 metric 走 Business struct，不用 promauto |
+| `logger.From(ctx)` | `logger.FromCtx(ctx)` | Task 8 (Recorder) | 包 `internal/pkg/logger`，Plan 1 写的 |
+| `apperr.SafetyRejected(reason, cat)` / `apperr.LLMFailed(err)` / `apperr.Internal(err)` helper | 没有 helper —— 用 `apperr.New(apperr.CodeXxx, reason, userMsg)` 直接构造 | Task 17 (Service.Preview) | apperr 是 Code enum + AppError struct + `New/Wrap` 构造函数，没 SafetyRejected helper |
+| `apperr.WriteJSON(c, err)` | `RespondError(c, *AppError)` | Task 19 (preview handler) | api 包内导出函数 |
+| `c.MustGet("user_id").(int64)` | `userctx.FromContext(c.Request.Context())` returns `(int64, bool)` | Task 19 (preview handler) | userctx 包路径是 `internal/api/userctx`（不是 `internal/userctx`） |
+| `safety.NewMatcherFromWords([]string)` / `matcher.FirstHit(input)` | `safety.NewKeywordMatcher([]string) *KeywordMatcher` / `Matcher.FindFirst(input) (string, bool)` | Task 16 (OutlineSafetyCheck) | Plan 3 写的 API |
+| `safety.NewPreCheckerFromMatcher(m)` / `pre.Check(ctx, prompt, blacklist)` | `safety.NewPreChecker(rs *RuleSet, intent IntentProvider)` / `pre.Check(ctx, PreCheckInput{UserPrompt, ChildFearList, MaxPromptRunes}) PreCheckOutput{Pass, RejectReason, MatchedCategory, NormalizedPrompt, ...}` | Task 17 (Service.Preview) | PreChecker **要求** IntentProvider 非 nil（precheck.go:119 调用 `p.intent.Classify`）—— 测试需要 `safety.NoopIntentProvider{}` |
+| `safety.RuleSet` 的 `IPWhitelist []IPEntry` / `IPBlacklist []IPEntry` | `IPWhitelist map[string]string` / `IPBlacklist []string` | Task 17 (Service.Preview test fixture) | grep 实际 struct field 类型 |
+| `viper.GetViper()` 全局 | 项目 viper 实例是局部 —— 加 `config.LoadWithViper` 返回 `(*Config, *viper.Viper, error)` | Task 11 (main.go wire) | 保留 `Load` 作 thin wrapper，仅 main.go 用 LoadWithViper |
+| `Summarizer.Summarize(ctx, text)` / `ChapterHook.Extract(ctx, text)` 纯文本 | `*ForStory` 平行方法接 `(ctx, text, childID, storyID, userID, traceHex)` — 老接口零 ID 包装保留兼容 | Task 11 (cost wire) | Recorder 需要 StoryID/ChildIDHash，原 method 拿不到 |
+| `traceid.From(ctx)` 返 `(string, ok)` 直接拼 event_id | `traceid.FromContext` 返 `tr-<8hex>` —— event_id 正则 `^[a-f0-9]{8,}` 拒绝 `tr-` 前缀；要 `strings.TrimPrefix(id, "tr-")` | Task 11 / 17 (event_id 拼接) | 加 helper `traceIDFromCtx(ctx) string` |
+| Plan 中 `cachedOutline` 小写（包内私有） | `CachedOutline` 大写 + `NewCachedOutline` 构造函数 | Task 13 (Cache) | 同包测试 + Service.Preview 都要构造，私有访问不便 |
+| `INSERT ... WHERE NOT EXISTS WHERE outline_id = $2`（PG 风格） | GORM `db.Exec(sql, args...)` 用 `?` 占位 + 不能复用同一占位 —— `outline_id` 出现两次需传两次 | Task 14 (MarkExpiredIfPending) | 行为等价 |
+| `OutlineEventAppender` interface 由 service/outline 定义并导入 | 由 **consumer 包 (service/story)** 定义 narrow interface —— 与项目 `StoryRepo` / `ChildRepo` / `Budget` 同款 duck-typing 习惯 | Task 21 (orchestrator step 0) | Go interface satisfaction 隐式；keep story 不 import outline 的关键 |
+| 测试 fixture `测试标题` 4 runes + 55 runes synopsis | parser 边界 5-16 / 60-160 —— fixture 必须 ≥5 / ≥60 | Task 15 (parser test) | 边界是产品决策；fixture 收紧到 `测试标题甲` + synopsis 加 5 字 |
+| `outline.OutcomeAccepted` 常量直接 import | story 包用 `"accepted"` 字符串字面量 —— 不能反向 import outline | Task 21 (step 0) | spec §7.5 N5 layering 守门 |
+| `metrics.OutlineOutcomeTotal.WithLabelValues(...)` 全局 | `biz *metrics.Business`（nil-safe）注入 + `biz.OutlineOutcomeTotal.WithLabelValues(...)` | Task 17 / 23 | 同 promauto 偏差，all metrics 走 Business struct |
+
+### Flutter（Dart）
+
+| Plan 写法 | 项目实际 | 影响 task | 说明 |
+|---|---|---|---|
+| `app/lib/providers/outline_provider.dart` + `extension ApiClientOutline on ApiClient` | `app/lib/state/outline_state.dart` + method on `ApiClient` class —— with `_dio` private field + `_ensureSuccess(r)` | Task 25 / 26 | 沿用 heartbeat_state / child_state / story_list_state 的目录 + 命名模式 |
+| `dio.post(...)` | `_dio.post(...)` + `_ensureSuccess(r)` after | Task 25 (api method) | dio 是 ApiClient 私有字段 |
+| `DurationChips(value: 5, onChanged: ...)` | `DurationChips(selected: 5, onChanged: ...)` | Task 27 (generate_screen) | widget API 实际 |
+| `ref.read(childProvider).value` | `ref.read(childProvider).valueOrNull`（AsyncValue API） | Task 27 / 28 | Riverpod 2.x AsyncValue 标准 |
+| GenerateScreen 没考虑 storyline 续集模式 | Plan 9b GenerateScreen 接 `final int? storylineId` 续集模式必须保留 —— spec §10.1 续集与 outline 互斥 | Task 27 | 重做时三分支：续集 / flag off / 默认（新极简） |
+| handler 注入用构造函数加参数 | `WithHousekeeper(hk)` chained setter —— 现有测试 fixture 零适配 | Task 23 (housekeeping hook) | 同 builder pattern；nil-safe field 守门 |
+
+### 其他
+
+| Plan 假设 | 项目实际 | 影响 |
+|---|---|---|
+| GitHub Actions `.github/workflows/...` | 项目无 `.github/workflows/`，CI 走 Makefile + 本地 lint | Task 24 (deps-lint) — `make check-layering` |
+| Subagent 派遣"永远可用" | Anthropic API 在 Sprint A 后段 + 个别 task 出现 529 Overloaded / ConnectionRefused | Task 5/6/7/8/16 inline 完成 |
+
+### Subagent vs Inline 实测对比（28 task 样本）
+
+- **22 task by subagent** — 平均 35-50k token，2-5 分钟，task 内部 6-30 次 tool call；隔离上下文不污染主会话
+- **6 task inline** — 主要发生在 529 拥塞 + 风险极低的 task（migration、纯 model、metrics 注册）
+- **2 处需要 subagent 二次派遣** — Task 15 测试 fixture 边界冲突（subagent 正确停下来报告，第二次派遣给决策）
+
+**结论**：Subagent-Driven 模式在 32-task 规模下**主会话上下文压力可控**，质量没下降。下次类似 plan 推荐沿用。
+
+### Task 29-32 起步注意
+
+- Aggregator (Task 29) 用 SQL DISTINCT ON 拿 outline 最新生命周期 —— **不要** UPDATE
+- CLI (Task 30) 用 tabwriter；DSN 来源是 `config.MustLoad()` —— 走 `LoadWithViper` 或简化版
+- 对账 (Task 31) 需要 Aggregator + CLI 上线 + 真实数据跑一周，**强制依赖运营动作**
+- 收官 (Task 32) 写 devlog 时引用本附录
