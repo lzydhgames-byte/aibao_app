@@ -170,6 +170,52 @@ class ApiClient {
     return Story.fromJson(r.data as Map<String, dynamic>);
   }
 
+  /// Plan 11A — POST /outlines/preview, returns AI-drafted outline card.
+  Future<OutlinePreviewResponse> previewOutline({
+    required int childId,
+    required String prompt,
+    required int durationMin,
+  }) async {
+    final r = await _dio.post('/outlines/preview', data: {
+      'child_id': childId,
+      'prompt': prompt,
+      'duration_min': durationMin,
+    });
+    _ensureSuccess(r);
+    return OutlinePreviewResponse.fromJson(r.data as Map<String, dynamic>);
+  }
+
+  /// Plan 11A — POST /outlines/:id/refresh, invalidates parent and regenerates
+  /// a new outline in the same group with variant_index++.
+  Future<OutlinePreviewResponse> refreshOutline(String outlineId) async {
+    final r = await _dio.post('/outlines/$outlineId/refresh');
+    _ensureSuccess(r);
+    return OutlinePreviewResponse.fromJson(r.data as Map<String, dynamic>);
+  }
+
+  /// Plan 11A — generate a full story from a confirmed outline ticket.
+  /// Mutually exclusive with start_storyline / storyline_id (server returns
+  /// 400 conflicting_modes if both set).
+  ///
+  /// [overrides] may contain only `style`, `themes`, and `educational_value` —
+  /// any other key the server silently drops (whitelist, spec §6.3).
+  Future<Story> generateStoryFromOutline({
+    required int childId,
+    required String outlineId,
+    Map<String, dynamic>? overrides,
+  }) async {
+    final body = <String, dynamic>{
+      'child_id': childId,
+      'outline_id': outlineId,
+    };
+    if (overrides != null && overrides.isNotEmpty) {
+      body['outline_overrides'] = overrides;
+    }
+    final r = await _dio.post('/stories/generate', data: body);
+    _ensureSuccess(r);
+    return Story.fromJson(r.data as Map<String, dynamic>);
+  }
+
   /// Plan 9b: list recent stories for a child, newest first (server caps to 50).
   Future<List<StoryListItem>> listStories(int childId, {int limit = 5}) async {
     final r = await _dio.get(
@@ -238,6 +284,63 @@ class ApiClient {
     final body = r.data as Map<String, dynamic>? ?? {};
     throw ApiException.fromResponse(code, body);
   }
+}
+
+/// Plan 11A — outline content as returned by /outlines/preview + /outlines/:id/refresh.
+class OutlineDto {
+  final String title;
+  final String synopsis;
+  final List<String> themes;
+  final String style;
+  final String educationalValue;
+  final int durationMin;
+  final String outlineGroupId;
+  final int variantIndex;
+  final String outlinePromptVersion;
+
+  OutlineDto({
+    required this.title,
+    required this.synopsis,
+    required this.themes,
+    required this.style,
+    required this.educationalValue,
+    required this.durationMin,
+    required this.outlineGroupId,
+    required this.variantIndex,
+    required this.outlinePromptVersion,
+  });
+
+  factory OutlineDto.fromJson(Map<String, dynamic> json) => OutlineDto(
+        title: json['title'] as String? ?? '',
+        synopsis: json['synopsis'] as String? ?? '',
+        themes: (json['themes'] as List?)?.cast<String>() ?? const [],
+        style: json['style'] as String? ?? '',
+        educationalValue: json['educational_value'] as String? ?? '',
+        durationMin: (json['duration_min'] as num?)?.toInt() ?? 5,
+        outlineGroupId: json['outline_group_id'] as String? ?? '',
+        variantIndex: (json['variant_index'] as num?)?.toInt() ?? 0,
+        outlinePromptVersion: json['outline_prompt_version'] as String? ?? '',
+      );
+}
+
+/// Plan 11A — wrapper returned by /outlines/preview + /outlines/:id/refresh.
+class OutlinePreviewResponse {
+  final String outlineId;
+  final OutlineDto outline;
+  final DateTime expiresAt;
+
+  OutlinePreviewResponse({
+    required this.outlineId,
+    required this.outline,
+    required this.expiresAt,
+  });
+
+  factory OutlinePreviewResponse.fromJson(Map<String, dynamic> json) =>
+      OutlinePreviewResponse(
+        outlineId: json['outline_id'] as String,
+        outline: OutlineDto.fromJson(json['outline'] as Map<String, dynamic>),
+        expiresAt: DateTime.parse(json['expires_at'] as String),
+      );
 }
 
 class LoginResult {
