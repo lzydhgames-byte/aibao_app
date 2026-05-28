@@ -1,4 +1,4 @@
-.PHONY: build run-dev test test-integration lint rules-lint migrate-up migrate-down seed-bgm clean check-layering
+.PHONY: build run-dev test test-integration lint rules-lint migrate-up migrate-down seed-bgm cost-report clean check-layering
 
 GO := go
 BINARY := bin/aibao-server
@@ -49,6 +49,9 @@ seed-bgm:
 	AIBAO_CONFIG=$(CONFIG_DEV) \
 	AIBAO_POSTGRES_PASSWORD=aibao \
 	$(GO) run ./cmd/seed-bgm -manifest=safety/bgm_manifest.yaml -config=$(CONFIG_DEV)
+
+cost-report:
+	@$(GO) build -o bin/cost-report ./cmd/cost-report
 
 clean:
 	rm -rf bin logs
